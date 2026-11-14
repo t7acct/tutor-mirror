@@ -7,8 +7,8 @@ watch, I freeze it.
 
 ## Why I built it
 
-I tutor online and do all my writing on an iPad in Goodnotes, mirrored to my
-Mac so I can share it on Meet. The app I was using worked, but my handwriting
+I do all my writing on an iPad in Goodnotes and mirror it to my Mac so I can
+share it on Meet. The app I was using worked, but my handwriting
 showed up noticeably behind my pen, which gets annoying fast when you're
 working through a problem live.
 
@@ -20,7 +20,7 @@ So I forked [VirtualMirror](https://github.com/souriscloud/VirtualMirror),
 rewrote the video side to be faster, and added freeze. A few things came
 along with it: a blank "One moment…" screen, and a lag meter so I could see
 where the delay comes from. The freeze and blank labels and the lag meter
-only show on my screen. Screen sharing doesn't pick them up.
+only show on my screen, because screen sharing leaves them out.
 
 ## Why it's faster
 
@@ -35,13 +35,13 @@ that, meaning how frames get decoded and drawn:
 | Route to the screen | straight from the decoder to Metal, and only the newest frame gets drawn | decoder, then main thread, then SwiftUI, then a display layer |
 | Network packets | read where they land, decrypted straight into the decoder's buffer | copied several times per frame |
 
-The frame rate is the big one. Asking for 60 instead of 30 halves the time
-between frames, and writing looks a lot smoother.
+The frame rate makes the biggest difference: asking for 60 instead of 30
+halves the time between frames, so writing looks a lot smoother.
 
 On my setup (iPad Pro, MacBook Pro, 120 Hz monitor, 5 GHz
-Wi-Fi), decoding a frame takes about 3–4 ms and getting it on screen takes
-about 16 ms. The Wi-Fi round trip is around 11 ms. Your Wi-Fi will matter more
-than anything else.
+Wi-Fi), decoding a frame takes about 3 to 4 ms and getting it on screen takes
+about 16 ms. The Wi-Fi round trip is around 11 ms, and on a worse network the
+Wi-Fi will add more delay than everything else put together.
 
 ## What you need
 
@@ -102,13 +102,12 @@ The keys only work while the TutorMirror window is in front, so you can still
 type F and B in other apps. Freeze and Blank are also in the View menu and in
 the menu bar icon.
 
-Once you've frozen it, you can do whatever you like on the iPad. Flip pages,
-rotate it, lock it, disconnect it. The student keeps seeing the still picture.
-The app keeps decoding in the background while frozen, so going live again is
-instant.
+Once it's frozen you can flip pages, rotate the iPad, lock it or even
+disconnect it, and the student keeps seeing the still picture. The app keeps
+decoding in the background while frozen, so going live again is instant.
 
 If you share your whole screen instead of the window, the student can see your
-menu bar, and the menu bar icon says FROZEN when it's frozen. Share the window.
+menu bar, where the TutorMirror icon says FROZEN while it's frozen.
 
 ## Settings
 
