@@ -293,6 +293,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         audio.target = self
         viewMenu.addItem(audio)
         viewMenu.addItem(.separator())
+        let rename = NSMenuItem(title: "Rename Receiver…", action: #selector(renameReceiver(_:)), keyEquivalent: "")
+        rename.target = self
+        viewMenu.addItem(rename)
         let restart = NSMenuItem(title: "Restart Receiver", action: #selector(restartReceiver(_:)), keyEquivalent: "r")
         restart.target = self
         viewMenu.addItem(restart)
@@ -361,6 +364,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func restartReceiver(_ sender: Any?) { manager.restart() }
+
+    /// The name shown in the iPhone/iPad Screen Mirroring list.
+    @objc func renameReceiver(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Rename Receiver"
+        alert.informativeText = "This is the name your iPad or iPhone shows under Screen Mirroring."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = Settings.receiverName
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Settings.receiverName = name
+        manager.rename(to: name)
+        windowController.window?.title = name
+    }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {

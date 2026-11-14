@@ -20,7 +20,10 @@ enum Settings {
     }
 
     /// Name shown in the iPad's Screen Mirroring list.
-    static var receiverName: String { d.string(forKey: "receiverName") ?? "TutorMirror" }
+    static var receiverName: String {
+        get { d.string(forKey: "receiverName") ?? "TutorMirror" }
+        set { d.set(newValue, forKey: "receiverName") }
+    }
 
     /// Display size advertised to the iPad. 2048×1536 is exactly 4:3, the
     /// shape of an iPad screen, so there are no black bars.
