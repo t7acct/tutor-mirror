@@ -67,7 +67,21 @@ if (( TEST )); then
   $PB -c "Set :CFBundleIdentifier $BUNDLE_ID" -c "Set :CFBundleExecutable $EXE" \
       -c "Set :CFBundleName $NAME" -c "Set :CFBundleDisplayName $NAME" "$APP/Contents/Info.plist"
 fi
-cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The icon source is Resources/AppIcon.icon (Icon Composer). With Xcode
+# installed it's compiled so macOS 26+ can draw its light, dark, clear and
+# tinted styles; without Xcode the prebuilt flat AppIcon.icns is used.
+if xcrun --find actool >/dev/null 2>&1; then
+  # Full paths: actool resolves relative ones against its helper's folder.
+  ICON_LOG=$(xcrun actool "$PWD/Resources/AppIcon.icon" --compile "$PWD/$APP/Contents/Resources" \
+    --app-icon AppIcon --include-all-app-icons --platform macosx --target-device mac \
+    --minimum-deployment-target 14.0 --enable-on-demand-resources NO --development-region en \
+    --output-partial-info-plist "$PWD/$OBJROOT/icon-info.plist" --errors 2>&1) || true
+  if [[ ! -f "$APP/Contents/Resources/Assets.car" ]]; then
+    echo "$ICON_LOG"; echo "Couldn't compile the app icon"; exit 1
+  fi
+else
+  cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 if (( RELEASE )); then
   # Ad-hoc signature: no developer certificate (and so no personal details) inside.
