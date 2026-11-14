@@ -34,7 +34,7 @@ that, meaning how frames get decoded and drawn:
 | | TutorMirror | VirtualMirror |
 |---|---|---|
 | Frame rate it asks the device for | 60 fps | 30 fps |
-| Picture size it asks for | 2048×1536 (iPad shaped, so no black bars) | 1920×1080 |
+| Picture size it asks for | 2732×1536 (wide, so a 4:3 iPad still comes through at 2048×1536) | 1920×1080 (a 4:3 iPad comes through at 1440×1080) |
 | Colour conversion | none, a Metal shader draws the raw YUV | converts every frame to BGRA |
 | Route to the screen | straight from the decoder to Metal, and only the newest frame gets drawn | decoder, then main thread, then SwiftUI, then a display layer |
 | Network packets | read where they land, decrypted straight into the decoder's buffer | copied several times per frame |
@@ -182,7 +182,7 @@ changing them.
 
 ```bash
 defaults write local.tutormirror maxFPS -int 120         # ask for 120 fps (most devices still send 60)
-defaults write local.tutormirror streamWidth -int 2732   # ask for a bigger picture
+defaults write local.tutormirror streamWidth -int 3640   # ask for a bigger picture
 defaults write local.tutormirror streamHeight -int 2048
 defaults delete local.tutormirror                        # back to defaults
 ```

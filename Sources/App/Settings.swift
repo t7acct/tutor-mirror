@@ -35,10 +35,13 @@ enum Settings {
         set { d.set(newValue, forKey: "receiverName") }
     }
 
-    /// Display size advertised to the iPad. 2048×1536 is exactly 4:3, the
-    /// shape of an iPad screen, so there are no black bars.
-    /// (VirtualMirror asks for 1920×1080, which shrinks a 4:3 iPad to ~1440×1080.)
-    static var streamWidth: Int { int("streamWidth", 2048) }
+    /// Display size advertised to the iPad: widescreen (16:9), 1536 tall.
+    /// Plain mirroring still arrives at the iPad's own shape (2048×1536 for a
+    /// 4:3 iPad). Apps that draw their own view for the second screen, like
+    /// Goodnotes' presentation mode, fill a 4:3 screen by cutting the sides of
+    /// the page, so the screen must be wide. (VirtualMirror asks for 1920×1080,
+    /// which is wide too but shrinks a 4:3 iPad to 1440×1080.)
+    static var streamWidth: Int { int("streamWidth", 2732) }
     static var streamHeight: Int { int("streamHeight", 1536) }
 
     /// Max frame rate requested from the iPad. VirtualMirror asks for 30.
