@@ -241,6 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         setUpStatusItem()
         if ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] != nil {
             manager.state = .mirroring("Self-test")
+            // Keep the test window on top: a covered window is never put on
+            // screen, so the display timing would read as zero.
+            windowController.window?.level = .floating
             let now = UInt64(NTPTime.nowSeconds) << 32
             ClockSync.shared.addSample(t1: now, t2: now, t3: now, t4: now)
             selfTest = SelfTest(decoder: manager.videoDecoder)
