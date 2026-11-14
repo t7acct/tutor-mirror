@@ -7,6 +7,29 @@ lag as I could get out of it. I use it to teach online. I share the mirror
 window on the call, and when I need to do something the student shouldn't
 watch, I freeze it.
 
+## What it does
+
+- Mirrors with very little lag: it asks for 60 fps and sends each frame
+  straight from the decoder to the screen ([details](#why-its-faster)).
+- Freeze (F) holds the picture still while you flip to the answers, rotate
+  or even disconnect the iPad.
+- Blank (B) shows the student a "One moment…" screen instead.
+- Draw on the picture from the Mac (D): pen, highlighter, arrow and box, in
+  five colours.
+- Zoom into part of the page with a pinch or ⌘-scroll.
+- Crop the iPad's status bar or an app's toolbar off what the student sees.
+- Save the board as a PNG (⌘S) or copy it to paste into the chat (⌘C).
+- Hides your mouse pointer from the student while it's over the mirror. You
+  still see it.
+- Keeps the FROZEN label, the drawing toolbar and the lag meter on your
+  screen only. Screen sharing leaves them out.
+- Turns away other devices that try to take over mid-lesson. Your own iPad
+  can always reconnect.
+- Works with Goodnotes' presentation mode without cutting off the page.
+- Keeps the Mac awake while you're mirroring.
+- Updates itself from this page, and never in the middle of a lesson.
+- Has a lag meter (⌘L) that shows where any delay comes from.
+
 ## Why I built it
 
 I do all my writing on an iPad in Goodnotes and mirror it to my Mac so I can
@@ -21,10 +44,10 @@ holds the picture still.
 So I forked [VirtualMirror](https://github.com/souriscloud/VirtualMirror),
 rewrote the video side to be faster, and added freeze. A few things came
 along with it: a blank "One moment…" screen, drawing on the picture from the
-Mac, zoom, cropping off the status bar, saving the board, and a lag meter so
-I could see where the delay comes from. The freeze and blank labels, the
-drawing toolbar and the lag meter only show on my screen, because screen
-sharing leaves them out.
+Mac, zoom, cropping off the status bar, saving the board, hiding my mouse
+pointer from the student, and a lag meter so I could see where the delay
+comes from. The freeze and blank labels, the drawing toolbar and the lag
+meter only show on my screen, because screen sharing leaves them out.
 
 ## Why it's faster
 
@@ -170,6 +193,19 @@ nudge the sliders until it just disappears. The crop is remembered.
 ⌘S saves what the student sees right now, drawings and crop included, as a
 PNG in Pictures › TutorMirror. File → Show Snapshots Folder opens it. ⌘C
 copies the same picture so you can paste it into the chat.
+
+### Your mouse pointer
+
+Meet, Zoom and Teams show your mouse pointer to the student whenever it's
+over the window you're sharing. TutorMirror hides it while it's over the
+mirror window and draws a stand-in in its place that only you can see. You
+can still click, draw and drag the window without the student watching an
+arrow wander across the page. This works while Meet or Zoom is the app in
+front too.
+
+If another app's window sits on top of the mirror, the pointer shows as
+normal over that window. If you'd rather point at things with the mouse,
+turn it off with View → Hide Pointer from Students.
 
 ## Settings
 
