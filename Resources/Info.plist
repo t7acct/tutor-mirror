@@ -2,26 +2,42 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key><string>en</string>
-	<key>CFBundleExecutable</key><string>TutorMirror</string>
-	<key>CFBundleIdentifier</key><string>local.tutormirror</string>
-	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleName</key><string>TutorMirror</string>
-	<key>CFBundleIconFile</key><string>AppIcon</string>
-	<key>CFBundleDisplayName</key><string>TutorMirror</string>
-	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>0.1.1</string>
-	<key>CFBundleVersion</key><string>2</string>
-	<key>LSMinimumSystemVersion</key><string>14.0</string>
-	<key>LSApplicationCategoryType</key><string>public.app-category.education</string>
-	<key>NSHighResolutionCapable</key><true/>
-	<key>NSPrincipalClass</key><string>NSApplication</string>
-	<key>NSHumanReadableCopyright</key><string>Based on VirtualMirror (GPL-3.0). Licensed under GPL-3.0.</string>
-	<key>NSLocalNetworkUsageDescription</key><string>TutorMirror needs local network access to receive AirPlay screen mirroring from your iPad.</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>TutorMirror</string>
+	<key>CFBundleExecutable</key>
+	<string>TutorMirror</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.tutormirror</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>TutorMirror</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.education</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_airplay._tcp</string>
 		<string>_raop._tcp</string>
 	</array>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Based on VirtualMirror (GPL-3.0). Licensed under GPL-3.0.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TutorMirror needs local network access to receive AirPlay screen mirroring from your iPad.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>
