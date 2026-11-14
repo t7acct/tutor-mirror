@@ -217,7 +217,7 @@ final class MirrorStreamReceiver: @unchecked Sendable {
         guard status == kCMBlockBufferNoErr, let dst else { return }
 
         videoDecryptor.decrypt(src, into: UnsafeMutableRawPointer(dst), count: count)
-        LatencyStats.shared.frameReceived()
+        LatencyStats.shared.frameReceived(senderNTP: timing.senderNTP, receivedHost: timing.receivedHost)
         videoDecoder.decode(block: block, size: count, timing: timing)
     }
 

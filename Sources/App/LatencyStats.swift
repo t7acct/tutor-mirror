@@ -111,6 +111,12 @@ final class LatencyStats: @unchecked Sendable {
         var macSide: (avg: Double, p95: Double) = (0, 0)
         var total: (avg: Double, p95: Double)?
         var worstGap = 0.0        // longest wait between two received frames
+        /// How much the iPad's own timestamps advanced across that longest gap.
+        /// Close to `worstGap`: the iPad sent nothing (pen lifted, or it dropped
+        /// frames). Much smaller: the frames existed and were held up on the way.
+        var worstGapSender = 0.0
+        /// Extra travel time per frame compared with the fastest recent frame.
+        var netExtra: (avg: Double, p95: Double) = (0, 0)
         var clockSynced = false
     }
 
@@ -118,13 +124,41 @@ final class LatencyStats: @unchecked Sendable {
     /// Last out-of-range iPad→Mac value, for diagnosing clock-sync problems.
     var lastRejected: Double?
     private var shown: [Sample] = []
-    private var received: [Double] = []   // host seconds
+    private struct Arrival {
+        var at: Double        // host seconds
+        var sender: Double    // iPad timestamp, seconds on the iPad's clock
+        var extra: Double     // travel time above the recent best
+    }
+    private var received: [Arrival] = []
+    // Fastest (arrival − iPad timestamp) seen recently. The two clocks have an
+    // unknown offset, so only the difference from this best case means anything.
+    // Two 5 s buckets, so slow clock drift between the devices washes out.
+    private var bestTransit = Double.infinity
+    private var previousBestTransit = Double.infinity
+    private var bestTransitBucketStart = 0.0
     private var skippedTimes: [Double] = []
     private var dims = (0, 0)
 
-    func frameReceived() {
-        let t = HostTime.seconds(HostTime.now)
-        lock.lock(); received.append(t); trim(now: t); lock.unlock()
+    func frameReceived(senderNTP: UInt64, receivedHost: UInt64) {
+        let t = HostTime.seconds(receivedHost)
+        let sender = NTPTime.seconds(senderNTP)
+        let transit = t - sender
+        lock.lock()
+        // Timestamps that jump relative to our clock (reconnect, iPad clock
+        // step) make the old best case meaningless: start again.
+        if let last = received.last, abs((sender - last.sender) - (t - last.at)) > 2 {
+            bestTransit = .infinity; previousBestTransit = .infinity
+        }
+        if t - bestTransitBucketStart > 5 {
+            previousBestTransit = bestTransit
+            bestTransit = .infinity
+            bestTransitBucketStart = t
+        }
+        bestTransit = min(bestTransit, transit)
+        let extra = max(0, transit - min(bestTransit, previousBestTransit))
+        received.append(Arrival(at: t, sender: sender, extra: extra))
+        trim(now: t)
+        lock.unlock()
     }
 
     func frameSkipped() {
@@ -159,7 +193,7 @@ final class LatencyStats: @unchecked Sendable {
     private func trim(now: Double) {
         let cutoff = now - 1.0
         if let i = shown.firstIndex(where: { $0.at >= cutoff }) { shown.removeFirst(i) } else { shown.removeAll() }
-        if let i = received.firstIndex(where: { $0 >= cutoff }) { received.removeFirst(i) } else { received.removeAll() }
+        if let i = received.firstIndex(where: { $0.at >= cutoff }) { received.removeFirst(i) } else { received.removeAll() }
         if let i = skippedTimes.firstIndex(where: { $0 >= cutoff }) { skippedTimes.removeFirst(i) } else { skippedTimes.removeAll() }
     }
 
@@ -191,13 +225,18 @@ final class LatencyStats: @unchecked Sendable {
             out.network = stat(nets)
             out.total = stat(s.compactMap { x in x.network.map { $0 + x.decode + x.display } })
         }
-        if r.count > 1 {
-            out.worstGap = zip(r.dropFirst(), r).map { $0 - $1 }.max() ?? 0
+        out.netExtra = stat(r.map(\.extra))
+        for (b, a) in zip(r.dropFirst(), r) where b.at - a.at > out.worstGap {
+            out.worstGap = b.at - a.at
+            out.worstGapSender = min(out.worstGap, max(0, b.sender - a.sender))
         }
         return out
     }
 
     func reset() {
-        lock.lock(); shown.removeAll(); received.removeAll(); skippedTimes.removeAll(); dims = (0, 0); lock.unlock()
+        lock.lock()
+        shown.removeAll(); received.removeAll(); skippedTimes.removeAll(); dims = (0, 0)
+        bestTransit = .infinity; previousBestTransit = .infinity; bestTransitBucketStart = 0
+        lock.unlock()
     }
 }

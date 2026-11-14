@@ -41,7 +41,8 @@ final class SelfTest: @unchecked Sendable {
             func ms(_ v: Double) -> String { String(format: "%.1f", v * 1000) }
             print("SELFTEST \(s.width)x\(s.height) in=\(s.receivedFPS) shown=\(s.shownFPS) skipped=\(s.skipped)"
                   + " encode+feed=\(s.network.map { ms($0.avg) } ?? "-") decode=\(ms(s.decode.avg))/p95 \(ms(s.decode.p95))"
-                  + " display=\(ms(s.display.avg))/p95 \(ms(s.display.p95)) gap=\(ms(s.worstGap))")
+                  + " display=\(ms(s.display.avg))/p95 \(ms(s.display.p95)) gap=\(ms(s.worstGap))"
+                  + " netExtra=\(ms(s.netExtra.avg))/p95 \(ms(s.netExtra.p95))")
             fflush(stdout)
         }
         guard let encoder, let pb = makePattern() else { return }
@@ -70,9 +71,9 @@ final class SelfTest: @unchecked Sendable {
         // Pretend the "iPad" clock equals the Mac clock, so wifi ≈ encode time here.
         let secs = sentWall
         let ntp = (UInt64(secs) << 32) | UInt64((secs - floor(secs)) * 4_294_967_296.0)
-        LatencyStats.shared.frameReceived()
-        decoder.decode(block: block, size: len,
-                       timing: FrameTiming(senderNTP: ntp, receivedHost: HostTime.now, receivedWall: NTPTime.nowSeconds))
+        let timing = FrameTiming(senderNTP: ntp, receivedHost: HostTime.now, receivedWall: NTPTime.nowSeconds)
+        LatencyStats.shared.frameReceived(senderNTP: ntp, receivedHost: timing.receivedHost)
+        decoder.decode(block: block, size: len, timing: timing)
         _ = sentHost
     }
 

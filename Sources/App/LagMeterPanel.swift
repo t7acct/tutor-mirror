@@ -69,10 +69,15 @@ final class LagMeterPanel: NSPanel {
         } else {
             lines.append("wifi       – ms  (measuring…)")
         }
+        // Extra travel time of each frame over the fastest recent one: what
+        // Wi-Fi (and the iPad's send queue) adds on top of the best case.
+        lines.append("delayed  \(ms(s.netExtra.avg)) ms over best  (worst 5%: \(ms(s.netExtra.p95)))")
         lines.append("decode   \(ms(s.decode.avg)) ms  (worst 5%: \(ms(s.decode.p95)))")
         lines.append("display  \(ms(s.display.avg)) ms  (worst 5%: \(ms(s.display.p95)))")
         lines.append("MAC SIDE \(ms(s.macSide.avg)) ms  (worst 5%: \(ms(s.macSide.p95)))")
-        lines.append("hiccup   \(ms(s.worstGap)) ms longest gap · \(s.skipped) skipped")
+        // A gap the iPad's own timestamps also show is the iPad not sending
+        // (nothing changed on screen); the rest was lost on the way here.
+        lines.append("hiccup   \(ms(s.worstGap)) ms longest gap (iPad idle \(ms(s.worstGapSender)), held up \(ms(s.worstGap - s.worstGapSender))) · \(s.skipped) skipped")
         label.stringValue = lines.joined(separator: "\n")
 
         let size = label.fittingSize

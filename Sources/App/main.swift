@@ -97,7 +97,8 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
                     + " decode=\(ms(s.decode.avg))/p95 \(ms(s.decode.p95))"
                     + " display=\(ms(s.display.avg))/p95 \(ms(s.display.p95))"
                     + " mac=\(ms(s.macSide.avg))/p95 \(ms(s.macSide.p95))"
-                    + " gap=\(ms(s.worstGap))"
+                    + " gap=\(ms(s.worstGap)) gapIdle=\(ms(s.worstGapSender))"
+                    + " netExtra=\(ms(s.netExtra.avg))/p95 \(ms(s.netExtra.p95))"
                 self.lagLog.notice("\(line, privacy: .public)")
             }
         }
