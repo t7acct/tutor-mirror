@@ -20,9 +20,11 @@ holds the picture still.
 
 So I forked [VirtualMirror](https://github.com/souriscloud/VirtualMirror),
 rewrote the video side to be faster, and added freeze. A few things came
-along with it: a blank "One moment…" screen, and a lag meter so I could see
-where the delay comes from. The freeze and blank labels and the lag meter
-only show on my screen, because screen sharing leaves them out.
+along with it: a blank "One moment…" screen, drawing on the picture from the
+Mac, zoom, cropping off the status bar, saving the board, and a lag meter so
+I could see where the delay comes from. The freeze and blank labels, the
+drawing toolbar and the lag meter only show on my screen, because screen
+sharing leaves them out.
 
 ## Why it's faster
 
@@ -73,6 +75,22 @@ Wi-Fi will add more delay than everything else put together.
 3. When it asks to find devices on your local network, say Allow. If you
    don't, your iPad won't be able to see it.
 
+The first time it opens you get a short welcome screen with the basics. It's
+under Help → Welcome to TutorMirror if you want it again.
+
+### Updates
+
+From 0.2.0 on, TutorMirror checks this page for a new release when it opens,
+and every few hours after that. If there is one, it asks, then downloads it,
+swaps itself out and reopens. Your settings stay. It never asks while you're
+mirroring: an update it finds mid-lesson waits until you've stopped. You can
+also use TutorMirror → Check for Updates…, or turn the automatic check off in
+the same menu.
+
+If you have 0.1.0 or 0.1.1, download 0.2.0 by hand once. Those versions don't
+have the updater yet. After an update macOS may ask about local network access
+again. Say Allow.
+
 ### Or build it
 
 You'll need Xcode or its command line tools.
@@ -87,6 +105,12 @@ cd tutor-mirror
 from there. `./build.sh --release` makes a zip that runs on both Apple
 Silicon and Intel.
 
+`./build.sh --test --run` builds a separate "TutorMirror Test" app with its
+own settings, ports and receiver name, so you can try changes while the real
+one is mirroring a lesson. `./release.sh "notes"` publishes the version in
+`Resources/Info.plist` as a GitHub release, which is what the updater looks
+for.
+
 ## Using it
 
 1. Open TutorMirror.
@@ -99,12 +123,19 @@ Then click the TutorMirror window and use these keys:
 |---|---|---|
 | F | the picture stops (F again goes live) | a blue FROZEN label |
 | B | a "One moment…" screen (B again to undo) | a purple BLANK label |
+| D | your drawings | the drawing toolbar |
+| X | the drawings disappear | |
+| = and - | the picture zoomed in or out | a grey ZOOMED label |
+| 0 | the whole page again | |
+| ⌘S | nothing | the snapshot goes to Pictures › TutorMirror |
+| ⌘C | nothing | the picture is copied, ready to paste |
+| ⌘K | | the crop sliders |
 | ⌘L | nothing | the lag meter |
 | ⌃⌘F | the mirror, full screen | |
 
-The keys only work while the TutorMirror window is in front, so you can still
-type F and B in other apps. Freeze and Blank are also in the View menu and in
-the menu bar icon.
+The single-letter keys only work while the TutorMirror window is in front, so
+you can still type them in other apps. Freeze, Blank and Draw are also in the
+View menu and in the menu bar icon.
 
 Once it's frozen you can flip pages, rotate the iPad, lock it or even
 disconnect it, and the student keeps seeing the still picture. The app keeps
@@ -112,6 +143,33 @@ decoding in the background while frozen, so going live again is instant.
 
 If you share your whole screen instead of the window, the student can see your
 menu bar, where the TutorMirror icon says FROZEN while it's frozen.
+
+### Drawing
+
+Press D and draw on the mirror with the mouse or trackpad. The toolbar along
+the bottom (only you see it) has a pen, a highlighter, an arrow and a box,
+plus colours. While drawing, P, H, A and R pick those tools, Delete undoes the
+last mark, and D or Esc stops drawing. Drawings stay on screen until you press
+X, so you can freeze, mark up the frozen page, then clear and go live.
+
+### Zoom
+
+Pinch on the trackpad, or hold ⌘ and scroll, to zoom in where the pointer is.
+Drag or two-finger scroll to move around, and double-click or press 0 to see
+the whole page. The student sees the zoomed picture.
+
+### Crop
+
+View → Crop cuts edges off what the student sees. Hide Status Bar takes off
+the iPad clock and battery. Hide Status Bar and Toolbar also takes a note
+app's toolbar off the top, but toolbars vary, so open Adjust Crop… (⌘K) and
+nudge the sliders until it just disappears. The crop is remembered.
+
+### Saving the board
+
+⌘S saves what the student sees right now, drawings and crop included, as a
+PNG in Pictures › TutorMirror. File → Show Snapshots Folder opens it. ⌘C
+copies the same picture so you can paste it into the chat.
 
 ## Settings
 
@@ -173,12 +231,6 @@ sudo ifconfig awdl0 down   # "up" brings it back, and so does a restart
 
 Plugging the Mac into Ethernet should get around it too, though I haven't
 tried that. I leave AWDL on, because I use Universal Clipboard while teaching.
-
-## What I want to add next
-
-- Cropping out the iPad status bar and the Goodnotes toolbar, so students only see the page
-- Drawing boxes and arrows on the mirror from the Mac
-- Zooming into part of the page, and saving the board at the end of a lesson
 
 ## Credits and licence
 
