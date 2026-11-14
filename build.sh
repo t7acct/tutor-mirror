@@ -3,16 +3,18 @@
 #
 #   ./build.sh              build for this Mac
 #   ./build.sh --run        build and (re)launch
+#   ./build.sh --install    build, copy to /Applications and launch it from there
 #   ./build.sh --release    universal (Apple Silicon + Intel), ad-hoc signed,
 #                           zipped to build/TutorMirror.zip for sharing
 set -euo pipefail
 cd "$(dirname "$0")"
 
-RUN=0; RELEASE=0
+RUN=0; RELEASE=0; INSTALL=0
 for arg in "$@"; do
   case $arg in
     --run) RUN=1 ;;
     --release) RELEASE=1 ;;
+    --install) INSTALL=1 ;;
     *) echo "unknown option $arg"; exit 1 ;;
   esac
 done
@@ -49,6 +51,7 @@ done
 lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/TutorMirror"
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 if (( RELEASE )); then
   # Ad-hoc signature: no developer certificate (and so no personal details) inside.
@@ -67,4 +70,12 @@ fi
 if (( RUN )); then
   pkill -x TutorMirror 2>/dev/null || true
   open "$APP"
+fi
+
+if (( INSTALL )); then
+  pkill -x TutorMirror 2>/dev/null || true
+  rm -rf /Applications/TutorMirror.app
+  ditto "$APP" /Applications/TutorMirror.app
+  echo "Installed /Applications/TutorMirror.app"
+  open /Applications/TutorMirror.app
 fi
