@@ -157,7 +157,9 @@ Local Network, and try View → Restart Receiver.
 
 This is a modified version of
 [VirtualMirror](https://github.com/souriscloud/VirtualMirror) by Souris.CLOUD
-(the exact commit is in `UPSTREAM.txt`), which builds on
+(forked from commit
+[`4d69798`](https://github.com/souriscloud/VirtualMirror/commit/4d697984807c2cbf36b271ab71f53493e7019c68)),
+which builds on
 [UxPlay](https://github.com/FDH2/UxPlay), [RPiPlay](https://github.com/FD-/RPiPlay)
 and [shairplay](https://github.com/juhovh/shairplay). See
 `ACKNOWLEDGMENTS-VirtualMirror.md`. I rewrote the video code in `Sources/Video`
