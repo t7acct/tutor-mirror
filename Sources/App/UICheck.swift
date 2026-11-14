@@ -183,6 +183,27 @@ final class UICheck {
             print("SKIP real pointer hide/show: it was already hidden (macOS hides it while you type)")
         }
 
+        // Cost: 0.3.0 asked WindowServer about every mouse move anywhere on the
+        // Mac, which made the whole Mac laggy. Away from the mirror it mustn't
+        // ask at all; over it, at most 10 times a second.
+        let queriesBefore = p.windowQueries
+        p.testLocation = (NSPoint(x: win.frame.maxX + 40, y: win.frame.midY), nil)
+        let t0 = ProcessInfo.processInfo.systemUptime
+        for _ in 0..<10_000 { p.update() }
+        let perMove = (ProcessInfo.processInfo.systemUptime - t0) / 10_000 * 1e6
+        check(p.windowQueries == queriesBefore, "mouse moves away from the mirror never ask WindowServer")
+        check(perMove < 20, String(format: "a mouse move away from the mirror costs %.1f µs", perMove))
+        p.testLocation = (inside, nil)
+        for _ in 0..<200 { p.update() }   // well under 0.1 s
+        check(p.windowQueries - queriesBefore <= 2, "over the mirror, WindowServer is asked rarely (\(p.windowQueries - queriesBefore) for 200 moves)")
+        p.testLocation = nil
+        p.update()
+        let monitored = p.enabled
+        p.enabled = false
+        p.update()
+        check(monitored && !p.isHiding, "turning the setting off stops it")
+        p.enabled = true
+
         // Updater: fetch the real latest release and install it into a scratch folder.
         do {
             let r = try await Updater.shared.fetchLatest()
