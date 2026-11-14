@@ -6,21 +6,32 @@
 #   ./build.sh --install    build, copy to /Applications and launch it from there
 #   ./build.sh --release    universal (Apple Silicon + Intel), ad-hoc signed,
 #                           zipped to build/TutorMirror.zip for sharing
+#   ./build.sh --test       a separate "TutorMirror Test" copy (own bundle ID,
+#                           settings, ports and receiver name) that can run next
+#                           to the real app, e.g. while it's in use for a lesson.
+#                           Combine with --run. Never touches the real app.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-RUN=0; RELEASE=0; INSTALL=0
+RUN=0; RELEASE=0; INSTALL=0; TEST=0
 for arg in "$@"; do
   case $arg in
     --run) RUN=1 ;;
     --release) RELEASE=1 ;;
     --install) INSTALL=1 ;;
+    --test) TEST=1 ;;
     *) echo "unknown option $arg"; exit 1 ;;
   esac
 done
 
-APP=build/TutorMirror.app
-rm -rf "$APP" build/obj
+if (( TEST )); then
+  if (( RELEASE || INSTALL )); then echo "--test can't be combined with --release or --install"; exit 1; fi
+  NAME="TutorMirror Test"; EXE=TutorMirrorTest; BUNDLE_ID=local.tutormirror.test; OBJROOT=build/obj-test
+else
+  NAME=TutorMirror; EXE=TutorMirror; BUNDLE_ID=local.tutormirror; OBJROOT=build/obj
+fi
+APP="build/$NAME.app"
+rm -rf "$APP" "$OBJROOT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 SDK=$(xcrun --show-sdk-path --sdk macosx)
@@ -33,7 +44,7 @@ PREFIX_MAP=("-file-prefix-map" "$ROOT=.")
 BINS=()
 for ARCH in $ARCHS; do
   TARGET=$ARCH-apple-macos14.0
-  OBJ=build/obj/$ARCH
+  OBJ=$OBJROOT/$ARCH
   mkdir -p "$OBJ"
 
   # FairPlay C code (from VirtualMirror / UxPlay)
@@ -48,9 +59,14 @@ for ARCH in $ARCHS; do
     -o "$OBJ/TutorMirror"
   BINS+=("$OBJ/TutorMirror")
 done
-lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/TutorMirror"
+lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/$EXE"
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+if (( TEST )); then
+  PB=/usr/libexec/PlistBuddy
+  $PB -c "Set :CFBundleIdentifier $BUNDLE_ID" -c "Set :CFBundleExecutable $EXE" \
+      -c "Set :CFBundleName $NAME" -c "Set :CFBundleDisplayName $NAME" "$APP/Contents/Info.plist"
+fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 if (( RELEASE )); then
@@ -68,7 +84,8 @@ else
 fi
 
 if (( RUN )); then
-  pkill -x TutorMirror 2>/dev/null || true
+  # Only ever stops the copy being rebuilt (the test copy has its own process name).
+  pkill -x "$EXE" 2>/dev/null || true
   open "$APP"
 fi
 
