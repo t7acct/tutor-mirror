@@ -87,7 +87,9 @@ if (( RELEASE )); then
   # Ad-hoc signature: no developer certificate (and so no personal details) inside.
   codesign --force --sign - "$APP"
   rm -f build/TutorMirror.zip
-  ditto -c -k --keepParent "$APP" build/TutorMirror.zip
+  # --norsrc: leave out macOS file metadata, which other unzip tools would
+  # unpack as stray ._ files that break the signature.
+  ditto -c -k --norsrc --keepParent "$APP" build/TutorMirror.zip
   echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/TutorMirror")) and build/TutorMirror.zip"
 else
   # Local builds: sign with your Apple Development certificate if you have one,
