@@ -16,6 +16,24 @@ final class AirPlayConnection: @unchecked Sendable {
     private weak var manager: AirPlayManager?
     var onClose: (() -> Void)?
 
+    /// What the server tracks for takeover protection.
+    enum Activity {
+        case request
+        case sessionStarted(deviceID: String?)
+        case sessionEnded
+    }
+    /// Called on every request and session change. Set before `start()`.
+    var onActivity: ((Activity) -> Void)?
+    /// Set (before `start()`) when this sender connected while another device
+    /// was mirroring. Its first SETUP waits for the server's answer before it
+    /// touches the shared ports or decoder: `done(true)` lets it carry on,
+    /// `done(false)` turns it away. Cleared once it's let in.
+    var admit: ((_ deviceID: String?, _ name: String?, _ done: @escaping @Sendable (Bool) -> Void) -> Void)?
+    /// Waiting for `admit` to answer: requests stay in the buffer until then.
+    private var awaitingAdmission = false
+    /// Turned away by takeover protection. It never had a session to end.
+    private var refused = false
+
     /// Identifies this connection's session to the manager, so events from a
     /// connection that's being replaced can't clobber the current session's UI.
     private let sessionID = UUID()
@@ -97,8 +115,11 @@ final class AirPlayConnection: @unchecked Sendable {
     /// Closes the connection from outside (eviction by a newer sender, receiver
     /// shutdown). The block holds a strong reference, so the manager is always
     /// told the session ended even if the caller drops its last reference now.
-    func close() {
-        queue.async { self.finish() }
+    func close(then completion: (@Sendable () -> Void)? = nil) {
+        queue.async {
+            self.finish()
+            completion?()
+        }
     }
 
     /// Tears everything down exactly once and reports the end of the session.
@@ -108,9 +129,11 @@ final class AirPlayConnection: @unchecked Sendable {
         finished = true
         connection.cancel()
         shutdownAllResources()
-        manager?.didEndSession(sessionID)
+        if !refused { manager?.didEndSession(sessionID) }
         onClose?()
         onClose = nil
+        onActivity = nil
+        admit = nil
     }
 
     /// Sets the audio volume on the active audio stream receiver.
@@ -172,7 +195,7 @@ final class AirPlayConnection: @unchecked Sendable {
     private func processBuffer() {
         // Stop as soon as a handler closes the connection (e.g. a rejected
         // pair-verify) — don't act on requests still sitting in the buffer.
-        while !buffer.isEmpty && !finished {
+        while !buffer.isEmpty && !finished && !awaitingAdmission {
             switch HTTPParser.parse(data: buffer) {
             case .needsMore:
                 return
@@ -191,6 +214,22 @@ final class AirPlayConnection: @unchecked Sendable {
     private func handleRequest(_ request: HTTPRequest) {
         logger.debug(">>> \(request.method) \(request.path) (\(request.body.count) bytes) [seq=\(self.requestSequence)]")
         requestSequence += 1
+        onActivity?(.request)
+
+        // A sender still waiting to be let in can't start, stop or record a
+        // session: that would touch the stream of the device that's mirroring.
+        if admit != nil {
+            switch request.method {
+            case "SETUP":
+                requestAdmission(for: request)
+                return
+            case "RECORD", "TEARDOWN", "FLUSH":
+                sendResponse(HTTPResponse.build(status: 455, statusText: "Method Not Valid in This State", cseq: request.cseq, isRTSP: true))
+                return
+            default:
+                break
+            }
+        }
 
         switch (request.method, request.path) {
         case ("GET", "/info"):
@@ -311,6 +350,34 @@ final class AirPlayConnection: @unchecked Sendable {
         ))
     }
 
+    /// Asks the server whether this sender may take over, holding back every
+    /// request after this SETUP until it answers.
+    private func requestAdmission(for request: HTTPRequest) {
+        guard let admit else { return handleSetup(request) }
+        let plist = try? PropertyListSerialization.propertyList(from: request.body, options: [], format: nil) as? [String: Any]
+        let deviceID = plist?["deviceID"] as? String
+        let name = plist?["name"] as? String
+        awaitingAdmission = true
+        admit(deviceID, name) { [self] allowed in
+            queue.async {
+                guard !self.finished else { return }
+                self.awaitingAdmission = false
+                if allowed {
+                    self.admit = nil
+                    self.handleSetup(request)
+                    self.processBuffer()
+                } else {
+                    // 453 is what AirPlay receivers send when they're busy
+                    // with another sender.
+                    self.refused = true
+                    self.awaitingAdmission = true   // ignore anything else it sends
+                    let response = HTTPResponse.build(status: 453, statusText: "Not Enough Bandwidth", cseq: request.cseq, isRTSP: true)
+                    self.connection.send(content: response, completion: .contentProcessed { _ in self.finish() })
+                }
+            }
+        }
+    }
+
     private func handleSetup(_ request: HTTPRequest) {
         logger.info("SETUP (\(request.body.count) bytes)")
 
@@ -387,6 +454,8 @@ final class AirPlayConnection: @unchecked Sendable {
             self.sessionEIV = eiv
             logger.debug("eiv extracted (\(eiv.count) bytes)")
         }
+
+        onActivity?(.sessionStarted(deviceID: plist["deviceID"] as? String))
 
         // Extract device name for UI state
         if let name = plist["name"] as? String {
@@ -520,6 +589,7 @@ final class AirPlayConnection: @unchecked Sendable {
             // before any re-SETUP on this connection configures a new stream.
             manager?.videoDecoder.reset()
             manager?.didEndSession(sessionID)
+            onActivity?(.sessionEnded)
         }
 
         sendResponse(HTTPResponse.ok(cseq: request.cseq, isRTSP: true))

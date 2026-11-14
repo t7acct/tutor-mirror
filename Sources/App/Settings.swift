@@ -57,6 +57,14 @@ enum Settings {
         set { d.set(newValue, forKey: "playAudio") }
     }
 
+    /// Let another iPhone or iPad on the network take over while your iPad is
+    /// mirroring. Off by default: only your iPad's own reconnects get through
+    /// until it stops mirroring or goes quiet. Read from network threads.
+    static var allowTakeover: Bool {
+        get { bool("allowTakeover", false) }
+        set { d.set(newValue, forKey: "allowTakeover") }
+    }
+
     static var showLagMeter: Bool {
         get { bool("showLagMeter", false) }
         set { d.set(newValue, forKey: "showLagMeter") }

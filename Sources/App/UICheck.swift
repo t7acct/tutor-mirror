@@ -1,4 +1,5 @@
 import AppKit
+import Network
 
 /// Headless check of the newer features, for developing while the real app
 /// is busy mirroring a lesson. Nothing is shown and focus is never taken.
@@ -142,6 +143,9 @@ final class UICheck {
         await wait(0.3)
         check(!retryVisible(), "Retry is hidden while mirroring")
 
+        checkTakeoverRules()
+        await checkTakeoverOverNetwork()
+
         // Updater: fetch the real latest release and install it into a scratch folder.
         do {
             let r = try await Updater.shared.fetchLatest()
@@ -161,5 +165,183 @@ final class UICheck {
         } catch {
             check(false, "updater: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Takeover protection
+
+    private func checkTakeoverRules() {
+        typealias P = TakeoverPolicy
+        let t = 1000.0
+        let ipad = P.Sender(host: "192.168.1.20", deviceID: "AA:BB:CC:DD:EE:FF", lastRequest: t - 1)
+        let quiet = P.Sender(host: "192.168.1.20", deviceID: "AA:BB:CC:DD:EE:FF", lastRequest: t - P.quietAfter - 1)
+        let other = "192.168.1.30", otherID = "11:22:33:44:55:66"
+
+        check(P.onConnect(host: other, current: nil, now: t, allowTakeover: false) == .replace,
+              "takeover: anyone connects when nobody is mirroring")
+        check(P.onConnect(host: "192.168.1.20", current: ipad, now: t, allowTakeover: false) == .replace,
+              "takeover: the mirroring iPad's own reconnect goes straight through")
+        check(P.onConnect(host: other, current: ipad, now: t, allowTakeover: false) == .check,
+              "takeover: another device is checked while the iPad mirrors")
+        check(P.onSetup(host: other, deviceID: otherID, current: ipad, now: t, allowTakeover: false) == .refuse,
+              "takeover: another device is turned away")
+        check(P.onSetup(host: "fe80::1%awdl0", deviceID: "aa:bb:cc:dd:ee:ff", current: ipad, now: t, allowTakeover: false) == .replace,
+              "takeover: the same iPad on a new address gets back in")
+        check(P.onSetup(host: other, deviceID: nil, current: ipad, now: t, allowTakeover: false) == .replace,
+              "takeover: a sender without a device ID is let in")
+        check(P.onSetup(host: other, deviceID: otherID, current: P.Sender(host: "192.168.1.20", deviceID: nil, lastRequest: t), now: t, allowTakeover: false) == .replace,
+              "takeover: unknown current device ID lets the sender in")
+        check(P.onConnect(host: other, current: quiet, now: t, allowTakeover: false) == .replace
+              && P.onSetup(host: other, deviceID: otherID, current: quiet, now: t, allowTakeover: false) == .replace,
+              "takeover: an iPad that went quiet can be replaced")
+        check(P.onConnect(host: other, current: ipad, now: t, allowTakeover: true) == .replace
+              && P.onSetup(host: other, deviceID: otherID, current: ipad, now: t, allowTakeover: true) == .replace,
+              "takeover: the setting turns protection off")
+        check(P.onConnect(host: nil, current: ipad, now: t, allowTakeover: false) == .replace,
+              "takeover: an unknown address goes through")
+    }
+
+    /// Real connections to a loopback-only server: 127.0.0.1 plays the
+    /// tutor's iPad and ::1 another device, since they count as different
+    /// addresses.
+    private func checkTakeoverOverNetwork() async {
+        let manager = app.manager
+        let hadSetting = UserDefaults.standard.object(forKey: "allowTakeover") != nil
+        let saved = Settings.allowTakeover
+        Settings.allowTakeover = false
+        let server = AirPlayServer(manager: manager)
+        server.start(port: manager.identity.ports.airplay, loopbackOnly: true)
+        await wait(0.3)
+        await takeoverSteps(manager)
+        server.stop()
+        await wait(0.3)
+        if hadSetting { Settings.allowTakeover = saved } else { UserDefaults.standard.removeObject(forKey: "allowTakeover") }
+        manager.state = .mirroring("Self-test")
+    }
+
+    private func takeoverSteps(_ manager: AirPlayManager) async {
+        let port = manager.identity.ports.airplay
+
+        func session(_ id: String, _ name: String) -> [String: Any] {
+            ["deviceID": id, "name": name, "eiv": Data(count: 16)]
+        }
+        let ipad = TestClient(host: "127.0.0.1", port: port)
+        guard await ipad.open() else { return check(false, "takeover: connect to the test server") }
+        check(await ipad.request("GET", "/info", cseq: 0) == 200, "takeover: iPad gets /info")
+        check(await ipad.request("SETUP", "rtsp://127.0.0.1/1", cseq: 1, plist: session("AA:BB:CC:DD:EE:FF", "Tutor iPad")) == 200,
+              "takeover: iPad starts a session")
+
+        let student = TestClient(host: "::1", port: port)
+        guard await student.open() else { return check(false, "takeover: second device connects") }
+        check(await student.request("GET", "/info", cseq: 0) == 200, "takeover: another device still gets /info")
+        check(await student.request("SETUP", "rtsp://[::1]/1", cseq: 1, plist: session("11:22:33:44:55:66", "Student iPhone")) == 453,
+              "takeover: another device's SETUP is refused with 453")
+        check(await student.closed(within: 2), "takeover: the refused device is disconnected")
+        await wait(0.2)
+        check(await ipad.request("POST", "/feedback", cseq: 2) == 200, "takeover: the iPad keeps its connection")
+        check(manager.state == .connecting("Tutor iPad"), "takeover: the window still shows the iPad (\(manager.state))")
+        check(app.windowController.toast?.text == "Kept Student iPhone from taking over",
+              "takeover: tutor-only toast says who was kept out")
+
+        // The same iPad from another address (as after a Wi-Fi change) gets back in.
+        let again = TestClient(host: "::1", port: port)
+        guard await again.open() else { return check(false, "takeover: iPad reconnects") }
+        check(await again.request("SETUP", "rtsp://[::1]/1", cseq: 1, plist: session("aa:bb:cc:dd:ee:ff", "Tutor iPad")) == 200,
+              "takeover: the same iPad on a new address is let in")
+        check(await ipad.closed(within: 2), "takeover: its old connection is closed")
+        again.close()
+    }
+}
+
+/// A bare-bones RTSP client for the takeover check. Every request gives up
+/// after a few seconds, so a broken server fails the check instead of hanging it.
+private final class TestClient: @unchecked Sendable {
+    private let conn: NWConnection
+    private let queue = DispatchQueue(label: "local.tutormirror.check-client")
+
+    init(host: String, port: UInt16) {
+        conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+    }
+
+    func open() async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let once = Once()
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready: once.run { cont.resume(returning: true) }
+                case .failed, .cancelled, .waiting: once.run { cont.resume(returning: false) }
+                default: break
+                }
+            }
+            conn.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + 3) { once.run { cont.resume(returning: false) } }
+        }
+    }
+
+    func close() { conn.cancel() }
+
+    /// Sends one request and returns the response's status code, or nil if
+    /// the connection closed or nothing came back in time.
+    func request(_ method: String, _ path: String, cseq: Int, plist: [String: Any]? = nil) async -> Int? {
+        var body = Data()
+        var head = "\(method) \(path) RTSP/1.0\r\nCSeq: \(cseq)\r\n"
+        if let plist, let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
+            body = data
+            head += "Content-Type: application/x-apple-binary-plist\r\n"
+        }
+        head += "Content-Length: \(body.count)\r\n\r\n"
+        conn.send(content: Data(head.utf8) + body, completion: .idempotent)
+
+        var buf = Data()
+        while true {
+            guard let chunk = await receive(timeout: 5) else { return nil }
+            buf += chunk
+            guard let end = buf.range(of: Data("\r\n\r\n".utf8)) else { continue }
+            let header = String(decoding: buf[..<end.lowerBound], as: UTF8.self)
+            let length = header.components(separatedBy: "\r\n")
+                .first { $0.lowercased().hasPrefix("content-length:") }
+                .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+            while buf.count - end.upperBound < length {
+                guard let more = await receive(timeout: 5) else { return nil }
+                buf += more
+            }
+            return header.split(separator: " ").dropFirst().first.flatMap { Int($0) }
+        }
+    }
+
+    /// True if the server closes the connection within `seconds`.
+    func closed(within seconds: Double) async -> Bool {
+        await receive(timeout: seconds) == nil && !timedOut
+    }
+
+    private var timedOut = false
+
+    /// The next bytes, or nil on close, error or timeout (`timedOut` says which).
+    private func receive(timeout: Double) async -> Data? {
+        await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
+            let once = Once()
+            timedOut = false
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, _ in
+                once.run { cont.resume(returning: data?.isEmpty == false ? data : nil) }
+            }
+            queue.asyncAfter(deadline: .now() + timeout) {
+                once.run {
+                    self.timedOut = true
+                    cont.resume(returning: nil)
+                }
+            }
+        }
+    }
+}
+
+/// Runs its block once; later calls do nothing.
+private final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func run(_ block: () -> Void) {
+        lock.lock()
+        let first = !done
+        done = true
+        lock.unlock()
+        if first { block() }
     }
 }

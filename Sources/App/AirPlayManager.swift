@@ -211,6 +211,14 @@ class AirPlayManager: ObservableObject {
         }
     }
 
+    /// Called when another device was turned away because this one is
+    /// mirroring (see `TakeoverPolicy`). Gets the device's name, if it sent one.
+    var onRefusedTakeover: ((String?) -> Void)?
+
+    nonisolated func didRefuseTakeover(deviceName: String?) {
+        Task { @MainActor in self.onRefusedTakeover?(deviceName) }
+    }
+
     /// A service-level failure (listener or Bonjour). Stops listening and
     /// advertising so senders don't see a receiver that can't accept them, and
     /// shows the error with a Retry button.

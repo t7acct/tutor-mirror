@@ -17,7 +17,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     let annotations = AnnotationView()
     private(set) lazy var drawToolbar = DrawToolbarPanel(annotations: annotations)
     private(set) var cropPanel: CropPanel?
-    private var toast: (text: String, color: NSColor, id: Int)?
+    private(set) var toast: (text: String, color: NSColor, id: Int)?
     private(set) var isBlank = false
     /// Called whenever freeze/blank changes (menu bar icon).
     var onModeChange: (() -> Void)?
@@ -119,6 +119,10 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
         manager.videoDecoder.sink = videoView
         videoView.onVideoSizeChange = { [weak self] size in self?.videoSizeChanged(size) }
+
+        manager.onRefusedTakeover = { [weak self] name in
+            self?.showToast("Kept \(name ?? "another device") from taking over", color: .systemOrange, for: 5)
+        }
 
         manager.$state
             .receive(on: RunLoop.main)
@@ -228,11 +232,11 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// A short message on the tutor-only badge (e.g. "Snapshot saved").
-    func showToast(_ text: String, color: NSColor = .systemGreen) {
+    func showToast(_ text: String, color: NSColor = .systemGreen, for seconds: TimeInterval = 2.5) {
         let id = (toast?.id ?? 0) + 1
         toast = (text, color, id)
         updateBadge()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             guard let self, self.toast?.id == id else { return }
             self.toast = nil
             self.updateBadge()
@@ -557,6 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(item("Play iPad Audio", #selector(toggleAudio(_:))))
         viewMenu.addItem(.separator())
         viewMenu.addItem(item("Rename Receiver…", #selector(renameReceiver(_:))))
+        viewMenu.addItem(item("Let Other Devices Take Over", #selector(toggleAllowTakeover(_:))))
         viewMenu.addItem(item("Restart Receiver", #selector(restartReceiver(_:)), "r"))
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
@@ -679,6 +684,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func restartReceiver(_ sender: Any?) { manager.restart() }
 
+    @objc func toggleAllowTakeover(_ sender: Any?) { Settings.allowTakeover.toggle() }
+
     /// The name shown in the iPhone/iPad Screen Mirroring list.
     @objc func renameReceiver(_ sender: Any?) {
         let alert = NSAlert()
@@ -707,6 +714,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(toggleLagMeter(_:)): item.state = wc?.lagMeterVisible == true ? .on : .off
         case #selector(toggleAudio(_:)): item.state = Settings.playAudio ? .on : .off
         case #selector(toggleAutoUpdates(_:)): item.state = Settings.autoCheckUpdates ? .on : .off
+        case #selector(toggleAllowTakeover(_:)):
+            item.state = Settings.allowTakeover ? .on : .off
+            item.toolTip = "When off, only the iPad that's mirroring can reconnect until it stops."
         case #selector(toggleFreeze(_:)):
             item.state = wc?.isFrozen == true ? .on : .off
             item.title = "Freeze Picture   (F)"
