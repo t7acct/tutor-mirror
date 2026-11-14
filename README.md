@@ -19,6 +19,8 @@ watch, I freeze it.
 - Zoom into part of the page with a pinch or ⌘-scroll.
 - Crop the iPad's status bar or an app's toolbar off what the student sees.
 - Save the board as a PNG (⌘S) or copy it to paste into the chat (⌘C).
+- Shows the student only the iPad: the mirror window has no title bar, so
+  the app's name never appears.
 - Hides your mouse pointer from the student while it's over the mirror. You
   still see it.
 - Keeps the FROZEN label, the drawing toolbar and the lag meter on your
@@ -140,6 +142,11 @@ for.
 2. On the iPad or iPhone: Control Center → Screen Mirroring → TutorMirror.
 3. On your call, share the TutorMirror window, not your whole screen.
 
+The mirror window has no title bar, so the student sees only the iPad and
+never the app's name. Drag the picture to move the window (while you're not
+drawing or zoomed in), drag an edge to resize it, and use ⌘W, ⌘M or ⌃⌘F to
+close it, minimise it or make it full screen.
+
 Then click the TutorMirror window and use these keys:
 
 | Key | Your student sees | You see |
@@ -183,7 +190,7 @@ the whole page. The student sees the zoomed picture.
 
 ### Crop
 
-View → Crop cuts edges off what the student sees. Hide Status Bar takes off
+View → Crop cuts edges off the iPad picture the student sees. Hide Status Bar takes off
 the iPad clock and battery. Hide Status Bar and Toolbar also takes a note
 app's toolbar off the top, but toolbars vary, so open Adjust Crop… (⌘K) and
 nudge the sliders until it just disappears. The crop is remembered.
