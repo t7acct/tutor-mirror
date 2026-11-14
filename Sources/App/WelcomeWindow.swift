@@ -41,7 +41,7 @@ final class WelcomeWindow: NSWindow {
             Self.row("pencil.tip.crop.circle", "Draw, zoom, crop and save",
                      "D draws on the picture, pinch or ⌘-scroll zooms in, View → Crop hides the status bar, and ⌘S saves the board to Pictures."),
             Self.row("eye.slash", "Some things are just for you",
-                     "The FROZEN label, the lag meter (⌘L), the drawing toolbar and this window never show up in screen sharing."),
+                     "Your mouse pointer over the mirror, the FROZEN label, the lag meter (⌘L), the drawing toolbar and this window never show up in screen sharing."),
         ]
         let rowStack = NSStackView(views: rows)
         rowStack.orientation = .vertical

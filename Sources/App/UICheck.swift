@@ -146,6 +146,43 @@ final class UICheck {
         checkTakeoverRules()
         await checkTakeoverOverNetwork()
 
+        // Mouse pointer: swapped for a stand-in only over the mirror window.
+        let p = wc.pointer, win = wc.window!
+        let inside = NSPoint(x: win.frame.midX, y: win.frame.midY)
+        check(p.wantsHidden(at: inside, topWindow: win.windowNumber), "pointer hides over the mirror window")
+        check(!p.wantsHidden(at: NSPoint(x: win.frame.maxX + 40, y: win.frame.midY), topWindow: win.windowNumber),
+              "pointer shows outside the mirror window")
+        check(!p.wantsHidden(at: inside, topWindow: -1), "pointer shows over another app's window on top of the mirror")
+        p.enabled = false
+        check(!p.wantsHidden(at: inside, topWindow: win.windowNumber), "pointer shows when the setting is off")
+        p.enabled = true
+        p.drawing = true
+        check(p.standIn.frame.size == NSCursor.crosshair.image.size, "draw mode uses a crosshair stand-in")
+        p.drawing = false
+        check(p.standIn.sharingType == .none, "stand-in pointer is hidden from screen sharing")
+        // Really hide it, briefly: a pointer in use here only blinks. macOS
+        // also hides the pointer while you type, so only judge the real
+        // pointer if it was showing to begin with.
+        let visibleBefore = SystemPointer.isVisible
+        p.testLocation = (inside, win.windowNumber)
+        p.update()
+        await wait(0.15)   // the follow timer runs meanwhile and must keep it hidden
+        let whileHidden = SystemPointer.isVisible
+        let standInShown = p.standIn.isVisible && p.isHiding
+        let standInFrame = p.standIn.frame
+        p.testLocation = nil
+        p.update()
+        await wait(0.1)
+        check(standInShown, "the stand-in shows in its place")
+        check(standInFrame.contains(inside), "the stand-in sits at the pointer")
+        check(!p.standIn.isVisible && !p.isHiding, "the stand-in goes away again")
+        if visibleBefore == true {
+            check(whileHidden == false, "the real pointer hides while TutorMirror is in the background")
+            check(SystemPointer.isVisible == true, "the real pointer comes back")
+        } else {
+            print("SKIP real pointer hide/show: it was already hidden (macOS hides it while you type)")
+        }
+
         // Updater: fetch the real latest release and install it into a scratch folder.
         do {
             let r = try await Updater.shared.fetchLatest()

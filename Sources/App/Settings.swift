@@ -65,6 +65,12 @@ enum Settings {
         set { d.set(newValue, forKey: "allowTakeover") }
     }
 
+    /// Swap the mouse pointer for one only you see while it's over the mirror.
+    static var hidePointer: Bool {
+        get { bool("hidePointer", true) }
+        set { d.set(newValue, forKey: "hidePointer") }
+    }
+
     static var showLagMeter: Bool {
         get { bool("showLagMeter", false) }
         set { d.set(newValue, forKey: "showLagMeter") }

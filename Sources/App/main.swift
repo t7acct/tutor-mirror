@@ -15,6 +15,8 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     private let badge = BadgePanel()
     private let blankOverlay = NSView()
     let annotations = AnnotationView()
+    /// Hides your mouse pointer from the student while it's over the mirror.
+    let pointer: PointerHider
     private(set) lazy var drawToolbar = DrawToolbarPanel(annotations: annotations)
     private(set) var cropPanel: CropPanel?
     private(set) var toast: (text: String, color: NSColor, id: Int)?
@@ -46,6 +48,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         window.collectionBehavior = [.fullScreenPrimary]
         window.contentAspectRatio = NSSize(width: 4, height: 3)
         window.setFrameAutosaveName("TutorMirrorWindow")
+        pointer = PointerHider(window: window, enabled: Settings.hidePointer)
         super.init(window: window)
         window.delegate = self
 
@@ -251,6 +254,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
     private func drawingChanged() {
         drawToolbar.refresh()
+        pointer.drawing = annotations.drawing
         guard let window else { return }
         if annotations.drawing {
             if drawToolbar.parent == nil { window.addChildWindow(drawToolbar, ordered: .above) }
@@ -464,7 +468,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func applicationWillTerminate(_ notification: Notification) { manager.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        windowController?.pointer.stop()
+        manager.stop()
+    }
 
     // MARK: Keys
 
@@ -557,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         cropMenu.addItem(item("Adjust Crop…", #selector(adjustCrop(_:)), "k"))
         viewMenu.addItem(withTitle: "Crop", action: nil, keyEquivalent: "").submenu = cropMenu
         viewMenu.addItem(.separator())
+        viewMenu.addItem(item("Hide Pointer from Students", #selector(toggleHidePointer(_:))))
         viewMenu.addItem(item("Show Lag Meter", #selector(toggleLagMeter(_:)), "l"))
         viewMenu.addItem(item("Play iPad Audio", #selector(toggleAudio(_:))))
         viewMenu.addItem(.separator())
@@ -686,6 +694,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func toggleAllowTakeover(_ sender: Any?) { Settings.allowTakeover.toggle() }
 
+    @objc func toggleHidePointer(_ sender: Any?) {
+        Settings.hidePointer.toggle()
+        windowController.pointer.enabled = Settings.hidePointer
+    }
+
     /// The name shown in the iPhone/iPad Screen Mirroring list.
     @objc func renameReceiver(_ sender: Any?) {
         let alert = NSAlert()
@@ -713,6 +726,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(toggleLagMeter(_:)): item.state = wc?.lagMeterVisible == true ? .on : .off
         case #selector(toggleAudio(_:)): item.state = Settings.playAudio ? .on : .off
+        case #selector(toggleHidePointer(_:)):
+            item.state = Settings.hidePointer ? .on : .off
+            item.toolTip = "Over the mirror window, students don't see your mouse pointer. You see a stand-in that screen sharing leaves out."
         case #selector(toggleAutoUpdates(_:)): item.state = Settings.autoCheckUpdates ? .on : .off
         case #selector(toggleAllowTakeover(_:)):
             item.state = Settings.allowTakeover ? .on : .off
