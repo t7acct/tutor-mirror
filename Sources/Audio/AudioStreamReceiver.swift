@@ -113,13 +113,14 @@ final class AudioStreamReceiver: @unchecked Sendable {
         if let ct = streamInfo["ct"] as? Int {
             logger.debug("Audio compression type: \(ct)")
         }
-        if let spf = streamInfo["spf"] as? Int {
+        // Values from the network: ignore anything out of range rather than crash.
+        if let spf = streamInfo["spf"] as? Int, (1...8192).contains(spf) {
             self.samplesPerFrame = UInt32(spf)
         }
-        if let sr = streamInfo["sr"] as? Int {
+        if let sr = streamInfo["sr"] as? Int, (8000...192_000).contains(sr) {
             self.sampleRate = Float64(sr)
         }
-        if let ch = streamInfo["channels"] as? Int {
+        if let ch = streamInfo["channels"] as? Int, (1...8).contains(ch) {
             self.channels = UInt32(ch)
         }
 
@@ -472,7 +473,7 @@ final class AudioStreamReceiver: @unchecked Sendable {
         if hasExtension {
             guard data.count >= headerSize + 4 else { return }
             let extensionLength = data.withUnsafeBytes { ptr -> Int in
-                Int(ptr.load(fromByteOffset: headerSize + 2, as: UInt16.self).bigEndian) * 4
+                Int(ptr.loadUnaligned(fromByteOffset: headerSize + 2, as: UInt16.self).bigEndian) * 4
             }
             headerSize += 4 + extensionLength
         }

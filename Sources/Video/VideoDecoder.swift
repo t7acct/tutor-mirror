@@ -86,7 +86,7 @@ final class VideoDecoder: @unchecked Sendable {
             guard off + len <= b.count else { break }
             pps.append(Data(b[off..<off + len])); off += len
         }
-        guard let s = sps.first, let p = pps.first else {
+        guard let s = sps.first, let p = pps.first, !s.isEmpty, !p.isEmpty else {
             logger.error("No SPS/PPS in avcC")
             return
         }
@@ -174,7 +174,21 @@ final class VideoDecoder: @unchecked Sendable {
 
         statsLock.lock(); stats.totalFrames += 1; statsLock.unlock()
 
-        let status = VTDecompressionSessionDecodeFrame(
+        var status = submit(sample, to: session, timing: timing)
+        if status == kVTInvalidSessionErr {
+            // macOS can invalidate a decoder (sleep/wake, GPU switch). Build a
+            // new one with the same format instead of showing a frozen picture
+            // until the iPad reconnects. Frames until the next keyframe may
+            // not decode, which only costs a moment.
+            logger.warning("Decoder session invalidated — recreating")
+            createSession(formatDescription)
+            if let fresh = self.session { status = submit(sample, to: fresh, timing: timing) }
+        }
+        if status != noErr { countError(status) }
+    }
+
+    private func submit(_ sample: CMSampleBuffer, to session: VTDecompressionSession, timing: FrameTiming) -> OSStatus {
+        VTDecompressionSessionDecodeFrame(
             session, sampleBuffer: sample, flags: [._EnableAsynchronousDecompression], infoFlagsOut: nil
         ) { [weak self] status, _, imageBuffer, _, _ in
             guard let self else { return }
@@ -186,7 +200,6 @@ final class VideoDecoder: @unchecked Sendable {
             t.decodedHost = HostTime.now
             self.sink?.display(imageBuffer, timing: t)
         }
-        if status != noErr { countError(status) }
     }
 
     private func countError(_ status: OSStatus) {

@@ -396,10 +396,11 @@ final class AirPlayConnection: @unchecked Sendable {
         }
 
         // Read the iPhone's timing port and start active NTP sync
-        if let remoteTimingPort = plist["timingPort"] as? Int {
+        // (Any device on the network can send this, so a bad port is ignored, not trusted.)
+        if let remoteTimingPort = (plist["timingPort"] as? Int).flatMap({ UInt16(exactly: $0) }) {
             if let remoteEndpoint = connection.currentPath?.remoteEndpoint,
                case .hostPort(let host, _) = remoteEndpoint {
-                ntpTimingServer?.startActiveSync(remoteHost: host, remotePort: UInt16(remoteTimingPort))
+                ntpTimingServer?.startActiveSync(remoteHost: host, remotePort: remoteTimingPort)
             }
         }
 
@@ -429,7 +430,7 @@ final class AirPlayConnection: @unchecked Sendable {
                 } else if let connID = stream["streamConnectionID"] as? Int64 {
                     streamConnectionID = UInt64(bitPattern: connID)
                 } else if let connID = stream["streamConnectionID"] as? Int {
-                    streamConnectionID = UInt64(connID)
+                    streamConnectionID = UInt64(bitPattern: Int64(connID))
                 }
                 startMirrorStream(streamConnectionID: streamConnectionID)
                 if hasRecorded {
