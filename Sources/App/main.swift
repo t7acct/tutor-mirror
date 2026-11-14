@@ -19,6 +19,9 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     private var isMirroring = false
     private var statsLogTimer: Timer?
     private let lagLog = Logger(subsystem: "local.tutormirror", category: "Lag")
+    /// Held while mirroring. During a lesson Meet/Zoom is the front app, and
+    /// macOS is otherwise free to nap a background app or delay its work.
+    private var mirroringActivity: NSObjectProtocol?
 
     init(manager: AirPlayManager) {
         self.manager = manager
@@ -126,6 +129,17 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.stringValue = message
         }
         updateStatusLabel()
+        setLatencyCritical(isMirroring)
+    }
+
+    private func setLatencyCritical(_ on: Bool) {
+        if on, mirroringActivity == nil {
+            mirroringActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .latencyCritical], reason: "Mirroring the iPad")
+        } else if !on, let activity = mirroringActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            mirroringActivity = nil
+        }
     }
 
     private func updateStatusLabel() {
