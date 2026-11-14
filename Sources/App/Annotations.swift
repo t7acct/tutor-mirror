@@ -50,7 +50,11 @@ final class AnnotationView: NSView {
     private var current: Stroke?
 
     var drawing = false {
-        didSet { window?.invalidateCursorRects(for: self); onChange?() }
+        didSet {
+            if !drawing, current != nil { current = nil; needsDisplay = true }   // stopped mid-stroke
+            window?.invalidateCursorRects(for: self)
+            onChange?()
+        }
     }
     var tool: DrawTool = .pen { didSet { onChange?() } }
     var color: NSColor = .systemRed { didSet { onChange?() } }

@@ -58,7 +58,7 @@ enum Settings {
     }
 
     static var showLagMeter: Bool {
-        get { bool("showLagMeter", true) }
+        get { bool("showLagMeter", false) }
         set { d.set(newValue, forKey: "showLagMeter") }
     }
 
@@ -104,6 +104,8 @@ struct CropInsets: Equatable, Sendable {
     static let none = CropInsets()
     /// The iPad status bar (clock, battery): about 24 of 1024 points in landscape.
     static let statusBar = CropInsets(top: 0.025)
+    /// The status bar plus a note app's toolbar (roughly; adjust with the sliders).
+    static let statusBarAndToolbar = CropInsets(top: 0.1)
 
     var isNone: Bool { self == .none }
 

@@ -9,6 +9,8 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     let manager: AirPlayManager
     let videoView: MetalVideoView
     private let statusLabel = NSTextField(labelWithString: "")
+    /// Shown under an error (port taken, no Local Network access).
+    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private let lagMeter = LagMeterPanel()
     private let badge = BadgePanel()
     private let blankOverlay = NSView()
@@ -68,6 +70,13 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, constant: -40),
         ])
 
+        retryButton.bezelStyle = .rounded
+        retryButton.controlSize = .large
+        retryButton.target = self
+        retryButton.action = #selector(retry)
+        retryButton.isHidden = true
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+
         // Drawings and zoom / pan handling, over the video. The student sees
         // the drawings; the toolbar to make them is a separate window.
         annotations.autoresizingMask = [.width, .height]
@@ -84,6 +93,12 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
             self?.updateBadge()
         }
         videoView.setCrop(Settings.crop)
+
+        container.addSubview(retryButton)
+        NSLayoutConstraint.activate([
+            retryButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            retryButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 20),
+        ])
 
         // "Blank" screen: what the student sees while you set something up.
         blankOverlay.wantsLayer = true
@@ -152,14 +167,20 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
             isMirroring = false
             statusLabel.stringValue = message
         }
+        if case .error = state { retryButton.isHidden = false } else { retryButton.isHidden = true }
         updateStatusLabel()
         setLatencyCritical(isMirroring)
     }
 
+    @objc private func retry() { manager.restart() }
+
     private func setLatencyCritical(_ on: Bool) {
         if on, mirroringActivity == nil {
             mirroringActivity = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated, .latencyCritical], reason: "Mirroring the iPad")
+                // Also keeps the display awake: you may write on the iPad for a
+                // long time without touching the Mac, and a sleeping display
+                // would stop the shared window updating for the student.
+                options: [.userInitiated, .latencyCritical, .idleDisplaySleepDisabled], reason: "Mirroring the iPad")
         } else if !on, let activity = mirroringActivity {
             ProcessInfo.processInfo.endActivity(activity)
             mirroringActivity = nil
@@ -368,9 +389,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
     private(set) var welcome: WelcomeWindow?
 
+    /// Mirroring, or an iPad is connecting: never interrupt with update prompts.
     private var isMirroring: Bool {
-        if case .mirroring = manager.state { return true }
-        return false
+        switch manager.state {
+        case .mirroring, .connecting: return true
+        default: return false
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -571,7 +595,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func setCropPreset(_ sender: NSMenuItem) {
         switch sender.tag {
         case 1: windowController.setCrop(.statusBar)
-        case 2: windowController.setCrop(CropInsets(top: 0.1))
+        case 2: windowController.setCrop(.statusBarAndToolbar)
         default: windowController.setCrop(.none)
         }
     }
@@ -598,9 +622,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             w.onClose = { [weak self] autoUpdates in
                 let firstRun = !Settings.hasSeenWelcome
                 Settings.hasSeenWelcome = true
-                Updater.shared.setAutomatic(autoUpdates)
-                if firstRun, autoUpdates, ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] == nil {
-                    Updater.shared.start()
+                let selfTest = ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] != nil
+                // Start checking after the first welcome, or when the box was
+                // just ticked; stop if it was just unticked.
+                if autoUpdates != Settings.autoCheckUpdates || (firstRun && autoUpdates) {
+                    if selfTest { Settings.autoCheckUpdates = autoUpdates } else { Updater.shared.setAutomatic(autoUpdates) }
                 }
                 self?.welcome = nil
             }
@@ -666,8 +692,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        var name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+        // Bonjour names are at most 63 bytes; a longer one would fail to advertise.
+        while name.utf8.count > 63 { name.removeLast() }
         Settings.receiverName = name
         manager.rename(to: name)
         windowController.window?.title = name
@@ -694,7 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return wc?.isZoomed == true
         case #selector(setCropPreset(_:)):
             let c = Settings.crop
-            let preset: CropInsets = item.tag == 1 ? .statusBar : item.tag == 2 ? CropInsets(top: 0.1) : .none
+            let preset: CropInsets = item.tag == 1 ? .statusBar : item.tag == 2 ? .statusBarAndToolbar : .none
             item.state = c == preset ? .on : .off
         default: break
         }

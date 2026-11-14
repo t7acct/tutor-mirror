@@ -85,5 +85,5 @@ final class CropPanel: NSPanel {
 
     @objc private func presetNone() { apply(.none) }
     @objc private func presetStatus() { apply(.statusBar) }
-    @objc private func presetToolbar() { apply(CropInsets(top: 0.1)) }
+    @objc private func presetToolbar() { apply(.statusBarAndToolbar) }
 }

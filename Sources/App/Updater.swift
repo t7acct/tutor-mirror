@@ -207,6 +207,8 @@ final class Updater {
     /// Download, check and swap in the new app. No UI, so the `ui` self-check can use it.
     func performInstall(_ r: Release, zip: URL, to target: URL) async throws {
         let newApp = try await downloadAndVerify(zip, version: r.version, nextTo: target)
+        // newApp is <work>/unzipped/TutorMirror.app: remove the download afterwards.
+        defer { try? FileManager.default.removeItem(at: newApp.deletingLastPathComponent().deletingLastPathComponent()) }
         updateProgress("Installing…")
         _ = try FileManager.default.replaceItemAt(target, withItemAt: newApp, backupItemName: nil, options: [])
         log.notice("installed \(r.version, privacy: .public) at \(target.path, privacy: .public)")
