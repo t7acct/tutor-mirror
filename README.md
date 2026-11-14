@@ -87,8 +87,8 @@ mirroring: an update it finds mid-lesson waits until you've stopped. You can
 also use TutorMirror → Check for Updates…, or turn the automatic check off in
 the same menu.
 
-If you have 0.1.0 or 0.1.1, download 0.2.0 by hand once. Those versions don't
-have the updater yet. After an update macOS may ask about local network access
+If you have 0.1.x, download the latest version by hand once. Those versions
+don't have the updater yet. After an update macOS may ask about local network access
 again. Say Allow.
 
 ### Or build it
@@ -200,7 +200,16 @@ iPhones speak the same protocol, so they should be fine, and the window
 reshapes itself for portrait, landscape and phones. If something breaks on
 your device, open an issue.
 
-It handles one device at a time. If a second one connects, it takes over.
+It handles one device at a time. If a second one connects, it takes over, so
+don't use it on a network you share with people who might pick it from their
+Screen Mirroring list.
+
+Goodnotes' presentation mode works too: the iPad keeps its toolbar and the
+student only sees the page. TutorMirror tells the iPad it's a widescreen
+display so Goodnotes doesn't cut off the sides of the page.
+
+While you're mirroring, TutorMirror keeps the Mac and its display awake, so the
+shared window doesn't freeze when you've only been writing on the iPad.
 
 It only does screen mirroring. Casting a YouTube video, audio-only AirPlay
 from Music and 4K/H.265 streams won't work.
