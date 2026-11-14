@@ -123,6 +123,25 @@ final class UICheck {
         check(v.zoomScale == 1, "zoom reset")
         wc.setCrop(.none)
 
+        // Malformed codec data from the network (empty SPS and PPS) used to crash.
+        VideoDecoder().configureWithAVCC(Data([1, 0x64, 0, 0x1F, 0xFF, 0xE1, 0, 0, 1, 0, 0]))
+        check(true, "empty SPS/PPS is ignored without crashing")
+
+        // An error shows a Retry button; leaving the error hides it again.
+        func retryVisible() -> Bool {
+            func find(_ v: NSView) -> NSButton? {
+                if let b = v as? NSButton, b.title == "Retry" { return b }
+                return v.subviews.lazy.compactMap(find).first
+            }
+            return wc.window?.contentView.flatMap(find).map { !$0.isHidden } ?? false
+        }
+        app.manager.state = .error("Port 53000 is already in use.")
+        await wait(0.3)
+        check(retryVisible(), "an error shows the Retry button")
+        app.manager.state = .mirroring("Self-test")
+        await wait(0.3)
+        check(!retryVisible(), "Retry is hidden while mirroring")
+
         // Updater: fetch the real latest release and install it into a scratch folder.
         do {
             let r = try await Updater.shared.fetchLatest()
