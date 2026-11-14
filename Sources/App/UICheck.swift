@@ -95,6 +95,16 @@ final class UICheck {
         check(v.croppedVideoSize == CGSize(width: 2048, height: 1536), "stream is 2048×1536 uncropped")
         save(v.renderOffscreen(size: CGSize(width: 1024, height: 768)), "render-full")
 
+        // The student sees the whole shared window, title bar included, so the
+        // title bar shows nothing and the picture fills the window.
+        let mw = wc.window!
+        check(mw.titleVisibility == .hidden && mw.titlebarAppearsTransparent, "mirror window shows no title")
+        check([NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy { mw.standardWindowButton($0)?.isHidden ?? true },
+              "mirror window shows no window buttons")
+        check(v.convert(v.bounds, to: nil).size == mw.frame.size, "the picture fills the whole window (\(v.bounds.size) in \(mw.frame.size))")
+        check(near(mw.frame.width / mw.frame.height, 2048.0 / 1536), "the window keeps the iPad's shape (\(mw.frame.size))")
+        check(!mw.title.isEmpty, "the window still has a name for Meet's window list (\(mw.title))")
+
         wc.setCrop(.statusBar)
         await wait(0.3)
         check(near(v.croppedVideoSize.height, 1536 * 0.975), "status-bar crop cuts 2.5% off the top")

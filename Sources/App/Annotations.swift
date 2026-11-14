@@ -114,7 +114,13 @@ final class AnnotationView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard drawing else {
-            if event.clickCount == 2 { onResetZoom?() }
+            if event.clickCount == 2 {
+                onResetZoom?()
+            } else if !isZoomed() {
+                // The window has no title bar for the student to see, so drag
+                // the picture to move it (while zoomed, dragging pans instead).
+                window?.performDrag(with: event)
+            }
             return
         }
         let p = normalized(event)

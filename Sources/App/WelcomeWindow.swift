@@ -35,7 +35,7 @@ final class WelcomeWindow: NSWindow {
             Self.row("ipad.landscape", "Connect your iPad",
                      "On the iPad, open Control Center → Screen Mirroring → \(name). Keep both on the same Wi-Fi. If macOS asks to find devices on your local network, click Allow."),
             Self.row("rectangle.inset.filled.and.person.filled", "Share the window, not the screen",
-                     "In Meet, Zoom or Teams, share the \(Settings.appName) window. The student then sees only the iPad."),
+                     "In Meet, Zoom or Teams, share the \(Settings.appName) window. The student then sees only the iPad: the window has no title bar. Drag the picture to move it."),
             Self.row("snowflake", "Freeze or blank it",
                      "Click the mirror window, then press F to hold the picture still while you flip to the answers, or B for a \"One moment…\" screen. Press again to go live."),
             Self.row("pencil.tip.crop.circle", "Draw, zoom, crop and save",

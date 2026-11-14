@@ -41,9 +41,18 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         self.videoView = view
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
+        // The title still names the window in Meet's or Zoom's window list, but
+        // nothing of the title bar is drawn: a shared window includes its title
+        // bar, and the student should see only the iPad. Close, minimise and
+        // full screen are in the menus (⌘W, ⌘M, ⌃⌘F); drag the picture to move it.
         window.title = Settings.receiverName
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(button)?.isHidden = true
+        }
         window.backgroundColor = .black
         window.collectionBehavior = [.fullScreenPrimary]
         window.contentAspectRatio = NSSize(width: 4, height: 3)
