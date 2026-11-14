@@ -1,3 +1,5 @@
+<p align="center"><img src="Resources/AppIcon.png" width="128" alt="TutorMirror icon"></p>
+
 # TutorMirror
 
 TutorMirror mirrors an iPad or iPhone to your Mac over AirPlay, with as little
@@ -81,7 +83,9 @@ cd tutor-mirror
 ./build.sh --run
 ```
 
-`./build.sh --release` makes a zip that runs on both Apple Silicon and Intel.
+`./build.sh --install` builds it, copies it into Applications and opens it
+from there. `./build.sh --release` makes a zip that runs on both Apple
+Silicon and Intel.
 
 ## Using it
 
@@ -146,6 +150,29 @@ from Music and 4K/H.265 streams won't work.
 If your device can't find TutorMirror, check they're on the same network,
 check TutorMirror is allowed under System Settings → Privacy & Security →
 Local Network, and try View → Restart Receiver.
+
+## If the picture hitches about once a second
+
+That's most likely AWDL, the thing macOS uses for AirDrop, Handoff and
+Universal Clipboard. About once a second it takes the Mac's Wi-Fi off your
+network for up to 100 ms. On my setup that adds around 22 ms to the average
+frame, which is more than the whole Mac side of TutorMirror.
+
+The lag meter (⌘L) shows it. The `delayed` line is how much longer each frame
+took to arrive than the fastest recent one. The `hiccup` line is the longest
+gap between frames, split into "iPad idle" (nothing changed on the iPad's
+screen) and "held up" (the frame existed and got stuck on the way). With AWDL
+you'll see a gap of about 100 ms, nearly all of it held up.
+
+The app can't stop this, I tried. Turning AWDL off does, if you can live
+without AirDrop and Handoff for a while:
+
+```bash
+sudo ifconfig awdl0 down   # "up" brings it back, and so does a restart
+```
+
+Plugging the Mac into Ethernet should get around it too, though I haven't
+tried that. I leave AWDL on, because I use Universal Clipboard while teaching.
 
 ## What I want to add next
 
