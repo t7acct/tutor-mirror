@@ -7,14 +7,20 @@ import os
 @MainActor
 final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     let manager: AirPlayManager
-    private let videoView: MetalVideoView
+    let videoView: MetalVideoView
     private let statusLabel = NSTextField(labelWithString: "")
     private let lagMeter = LagMeterPanel()
     private let badge = BadgePanel()
     private let blankOverlay = NSView()
+    let annotations = AnnotationView()
+    private(set) lazy var drawToolbar = DrawToolbarPanel(annotations: annotations)
+    private(set) var cropPanel: CropPanel?
+    private var toast: (text: String, color: NSColor, id: Int)?
     private(set) var isBlank = false
     /// Called whenever freeze/blank changes (menu bar icon).
     var onModeChange: (() -> Void)?
+    /// Called when mirroring stops (a good moment to offer an update).
+    var onIdle: (() -> Void)?
     private var cancellables = Set<AnyCancellable>()
     private var isMirroring = false
     private var statsLogTimer: Timer?
@@ -61,6 +67,23 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             statusLabel.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, constant: -40),
         ])
+
+        // Drawings and zoom / pan handling, over the video. The student sees
+        // the drawings; the toolbar to make them is a separate window.
+        annotations.autoresizingMask = [.width, .height]
+        annotations.frame = container.bounds
+        container.addSubview(annotations)
+        annotations.contentRectProvider = { [weak self] in self?.videoView.contentRect ?? .zero }
+        annotations.onZoom = { [weak self] factor, point in self?.videoView.zoom(by: factor, around: point) }
+        annotations.onPan = { [weak self] delta in self?.videoView.pan(by: delta) }
+        annotations.onResetZoom = { [weak self] in self?.videoView.resetZoom() }
+        annotations.isZoomed = { [weak self] in (self?.videoView.zoomScale ?? 1) > 1 }
+        annotations.onChange = { [weak self] in self?.drawingChanged() }
+        videoView.onViewportChange = { [weak self] in
+            self?.annotations.needsDisplay = true
+            self?.updateBadge()
+        }
+        videoView.setCrop(Settings.crop)
 
         // "Blank" screen: what the student sees while you set something up.
         blankOverlay.wantsLayer = true
@@ -117,6 +140,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         switch state {
         case .idle:
             isMirroring = false
+            onIdle?()
             statusLabel.stringValue = "Waiting for iPad\n\nOn the iPad: Control Center → Screen Mirroring → \(Settings.receiverName)"
         case .connecting(let name):
             isMirroring = false
@@ -167,15 +191,125 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateBadge() {
         guard let window else { return }
-        switch (isFrozen, isBlank) {
-        case (_, true):
+        let zoom = videoView.zoomScale
+        if let toast {
+            badge.show(text: toast.text, color: toast.color, over: window)
+        } else if isBlank {
             badge.show(text: "BLANK — student sees \"One moment…\"   press B to undo", color: .systemPurple, over: window)
-        case (true, false):
+        } else if isFrozen {
             badge.show(text: "❄︎ FROZEN — student sees a still picture   press F to go live", color: .systemBlue, over: window)
-        default:
+        } else if zoom > 1.01 {
+            badge.show(text: String(format: "ZOOMED %.1f×   press 0 to see the whole page", zoom), color: .systemGray, over: window)
+        } else {
             badge.orderOut(nil)
         }
         onModeChange?()
+    }
+
+    /// A short message on the tutor-only badge (e.g. "Snapshot saved").
+    func showToast(_ text: String, color: NSColor = .systemGreen) {
+        let id = (toast?.id ?? 0) + 1
+        toast = (text, color, id)
+        updateBadge()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self, self.toast?.id == id else { return }
+            self.toast = nil
+            self.updateBadge()
+        }
+    }
+
+    // MARK: Drawing
+
+    var isDrawing: Bool { annotations.drawing }
+
+    func toggleDrawing() { annotations.drawing.toggle() }
+
+    private func drawingChanged() {
+        drawToolbar.refresh()
+        guard let window else { return }
+        if annotations.drawing {
+            if drawToolbar.parent == nil { window.addChildWindow(drawToolbar, ordered: .above) }
+            drawToolbar.reposition()
+            drawToolbar.orderFront(nil)
+        } else if drawToolbar.parent != nil {
+            window.removeChildWindow(drawToolbar)
+            drawToolbar.orderOut(nil)
+        }
+        onModeChange?()
+    }
+
+    // MARK: Zoom
+
+    func zoomIn() { videoView.zoom(by: 1.25, around: CGPoint(x: 0.5, y: 0.5)) }
+    func zoomOut() { videoView.zoom(by: 0.8, around: CGPoint(x: 0.5, y: 0.5)) }
+    func resetZoom() { videoView.resetZoom() }
+    var isZoomed: Bool { videoView.zoomScale > 1.01 }
+
+    // MARK: Crop
+
+    func setCrop(_ insets: CropInsets) {
+        Settings.crop = insets.clamped
+        videoView.setCrop(insets)
+        cropPanel?.close()
+        cropPanel = nil
+    }
+
+    func showCropPanel() {
+        if cropPanel == nil {
+            let panel = CropPanel(insets: Settings.crop)
+            panel.onChange = { [weak self] insets in
+                Settings.crop = insets
+                self?.videoView.setCrop(insets)
+            }
+            if let frame = window?.frame {
+                panel.setFrameTopLeftPoint(NSPoint(x: frame.maxX + 12, y: frame.maxY))
+            }
+            cropPanel = panel
+        }
+        cropPanel?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: Snapshots
+
+    /// What the student sees right now (cropped, zoomed, with drawings).
+    func snapshotImage() -> CGImage? {
+        guard !isBlank, let frame = videoView.snapshot() else { return nil }
+        return annotations.composite(onto: frame) ?? frame
+    }
+
+    static var snapshotsFolder: URL {
+        FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0].appendingPathComponent("TutorMirror")
+    }
+
+    func saveSnapshot() {
+        guard let image = snapshotImage() else {
+            showToast(isBlank ? "Nothing to save while blank" : "Nothing to save yet", color: .systemOrange)
+            return
+        }
+        let folder = Self.snapshotsFolder
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        let url = folder.appendingPathComponent("TutorMirror \(f.string(from: Date())).png")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let rep = NSBitmapImageRep(cgImage: image)
+            guard let data = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+            try data.write(to: url)
+            showToast("Saved to Pictures › TutorMirror")
+        } catch {
+            showToast("Couldn't save the snapshot", color: .systemRed)
+        }
+    }
+
+    func copySnapshot() {
+        guard let image = snapshotImage() else {
+            showToast("Nothing to copy yet", color: .systemOrange)
+            return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([NSImage(cgImage: image, size: .zero)])
+        showToast("Copied the picture")
     }
 
     /// Lock the window to the stream's shape (e.g. 4:3 landscape, 3:4 portrait)
@@ -218,6 +352,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
     private func repositionPanels() {
         lagMeter.reposition()
+        if drawToolbar.parent != nil { drawToolbar.reposition() }
         if badge.isVisible, let window { badge.reposition(over: window) }
     }
 }
@@ -231,29 +366,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var selfTest: SelfTest?
     private var keyMonitor: Any?
     private var statusItem: NSStatusItem?
+    private(set) var welcome: WelcomeWindow?
+
+    private var isMirroring: Bool {
+        if case .mirroring = manager.state { return true }
+        return false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
         windowController = MirrorWindowController(manager: manager)
         windowController.showWindow(nil)
         windowController.onModeChange = { [weak self] in self?.updateStatusItem() }
+        windowController.onIdle = { Updater.shared.offerPendingIfAppropriate() }
 
-        // Single-key shortcuts while the TutorMirror window is in front:
-        // F = freeze / go live, B = blank / unblank. (Only in this app, so
-        // you can still type F and B everywhere else.)
+        // Single-key shortcuts while the TutorMirror window is in front (only
+        // in this app, so you can still type these letters everywhere else).
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            let mods = event.modifierFlags.intersection([.command, .control, .option])
-            guard mods.isEmpty, event.window === self.windowController.window,
-                  let key = event.charactersIgnoringModifiers?.lowercased() else { return event }
-            switch key {
-            case "f": self.windowController.toggleFreeze(); return nil
-            case "b": self.windowController.toggleBlank(); return nil
-            default: return event
-            }
+            return self.handleKey(event) ? nil : event
         }
         setUpStatusItem()
-        if ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] != nil {
+        let selfTestMode = ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"]
+        if selfTestMode == "ui" {
+            // Headless check of the windows, crop/zoom shader, snapshots and
+            // updater. Shows nothing and never takes focus, so it can run
+            // while the real app is in use.
+            windowController.window?.alphaValue = 0
+            windowController.window?.ignoresMouseEvents = true
+            manager.state = .mirroring("Self-test")
+            selfTest = SelfTest(decoder: manager.videoDecoder)
+            selfTest?.start()
+            UICheck(app: self).run()
+            return
+        }
+        if let selfTestMode {
             manager.state = .mirroring("Self-test")
             // Keep the test window on top: a covered window is never put on
             // screen, so the display timing would read as zero.
@@ -262,7 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             ClockSync.shared.addSample(t1: now, t2: now, t3: now, t4: now)
             selfTest = SelfTest(decoder: manager.videoDecoder)
             selfTest?.start()
-            if ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] == "freeze" {
+            if selfTestMode == "freeze" {
                 // Scripted freeze test: 3s freeze, 6s blank, 8s unblank, 10s unfreeze.
                 let wc = windowController!
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { print("TEST freeze"); fflush(stdout); wc.setFrozen(true) }
@@ -274,70 +421,192 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             manager.start()
         }
         NSApp.activate()
+
+        Updater.shared.isBusy = { [weak self] in self?.isMirroring ?? false }
+        if !Settings.hasSeenWelcome {
+            showWelcome(nil)
+        } else if selfTestMode == nil {
+            Updater.shared.start()
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Updater.shared.offerPendingIfAppropriate()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) { manager.stop() }
 
+    // MARK: Keys
+
+    /// Returns true if the key was used.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection([.command, .control, .option])
+        guard mods.isEmpty, event.window === windowController.window,
+              let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        let wc = windowController!
+        if wc.isDrawing {
+            switch event.keyCode {
+            case 53: wc.annotations.drawing = false; return true          // Esc
+            case 51, 117: wc.annotations.undo(); return true               // Delete
+            default: break
+            }
+            if let tool = DrawTool.allCases.first(where: { $0.key == key }) {
+                wc.annotations.tool = tool
+                return true
+            }
+        }
+        switch key {
+        case "f": wc.toggleFreeze()
+        case "b": wc.toggleBlank()
+        case "d": wc.toggleDrawing()
+        case "x": wc.annotations.clear()
+        case "=", "+": wc.zoomIn()
+        case "-", "_": wc.zoomOut()
+        case "0": wc.resetZoom()
+        default: return false
+        }
+        return true
+    }
+
     // MARK: Menu
 
+    private func item(_ title: String, _ action: Selector, _ key: String = "", _ mods: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        i.keyEquivalentModifierMask = mods
+        i.target = self
+        return i
+    }
+
     private func buildMenu() {
+        let name = Settings.appName
         let main = NSMenu()
 
-        let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About TutorMirror", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(item("Check for Updates…", #selector(checkForUpdates(_:))))
+        appMenu.addItem(item("Check for Updates Automatically", #selector(toggleAutoUpdates(_:))))
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide TutorMirror", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit TutorMirror", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = appMenu
-        main.addItem(appItem)
+        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        main.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = appMenu
 
-        let viewItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(item("Save Snapshot", #selector(saveSnapshot(_:)), "s"))
+        fileMenu.addItem(item("Show Snapshots Folder", #selector(showSnapshots(_:))))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        main.addItem(withTitle: "File", action: nil, keyEquivalent: "").submenu = fileMenu
+
+        // Standard text editing (rename field) plus copying the picture: ⌘C
+        // copies text in a text field, and the mirror picture otherwise.
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(item("Undo Drawing", #selector(undoDrawing(_:)), "z"))
+        editMenu.addItem(item("Clear Drawings   (X)", #selector(clearDrawings(_:))))
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        main.addItem(withTitle: "Edit", action: nil, keyEquivalent: "").submenu = editMenu
+
         let viewMenu = NSMenu(title: "View")
-        let freeze = NSMenuItem(title: "Freeze Picture", action: #selector(toggleFreeze(_:)), keyEquivalent: "")
-        freeze.target = self
-        viewMenu.addItem(freeze)
-        let blank = NSMenuItem(title: "Blank Screen", action: #selector(toggleBlank(_:)), keyEquivalent: "")
-        blank.target = self
-        viewMenu.addItem(blank)
+        viewMenu.addItem(item("Freeze Picture", #selector(toggleFreeze(_:))))
+        viewMenu.addItem(item("Blank Screen", #selector(toggleBlank(_:))))
+        viewMenu.addItem(item("Draw on Picture", #selector(toggleDrawing(_:))))
         viewMenu.addItem(.separator())
-        let lag = NSMenuItem(title: "Show Lag Meter", action: #selector(toggleLagMeter(_:)), keyEquivalent: "l")
-        lag.target = self
-        viewMenu.addItem(lag)
-        let audio = NSMenuItem(title: "Play iPad Audio", action: #selector(toggleAudio(_:)), keyEquivalent: "")
-        audio.target = self
-        viewMenu.addItem(audio)
+        viewMenu.addItem(item("Zoom In   (=)", #selector(zoomIn(_:))))
+        viewMenu.addItem(item("Zoom Out   (-)", #selector(zoomOut(_:))))
+        viewMenu.addItem(item("Whole Page   (0)", #selector(resetZoom(_:))))
+        let cropMenu = NSMenu(title: "Crop")
+        let noCrop = item("No Crop", #selector(setCropPreset(_:))); noCrop.tag = 0
+        let status = item("Hide Status Bar", #selector(setCropPreset(_:))); status.tag = 1
+        let toolbar = item("Hide Status Bar and Toolbar", #selector(setCropPreset(_:))); toolbar.tag = 2
+        cropMenu.addItem(noCrop); cropMenu.addItem(status); cropMenu.addItem(toolbar)
+        cropMenu.addItem(.separator())
+        cropMenu.addItem(item("Adjust Crop…", #selector(adjustCrop(_:)), "k"))
+        viewMenu.addItem(withTitle: "Crop", action: nil, keyEquivalent: "").submenu = cropMenu
         viewMenu.addItem(.separator())
-        let rename = NSMenuItem(title: "Rename Receiver…", action: #selector(renameReceiver(_:)), keyEquivalent: "")
-        rename.target = self
-        viewMenu.addItem(rename)
-        let restart = NSMenuItem(title: "Restart Receiver", action: #selector(restartReceiver(_:)), keyEquivalent: "r")
-        restart.target = self
-        viewMenu.addItem(restart)
+        viewMenu.addItem(item("Show Lag Meter", #selector(toggleLagMeter(_:)), "l"))
+        viewMenu.addItem(item("Play iPad Audio", #selector(toggleAudio(_:))))
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(item("Rename Receiver…", #selector(renameReceiver(_:))))
+        viewMenu.addItem(item("Restart Receiver", #selector(restartReceiver(_:)), "r"))
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
             .keyEquivalentModifierMask = [.command, .control]
-        viewItem.submenu = viewMenu
-        main.addItem(viewItem)
+        main.addItem(withTitle: "View", action: nil, keyEquivalent: "").submenu = viewMenu
 
-        let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        windowItem.submenu = windowMenu
-        main.addItem(windowItem)
+        windowMenu.addItem(item("Show Mirror Window", #selector(showMirrorWindow(_:))))
+        main.addItem(withTitle: "Window", action: nil, keyEquivalent: "").submenu = windowMenu
         NSApp.windowsMenu = windowMenu
+
+        let helpMenu = NSMenu(title: "Help")
+        helpMenu.addItem(item("Welcome to \(name)", #selector(showWelcome(_:))))
+        helpMenu.addItem(item("\(name) on GitHub", #selector(openGitHub(_:))))
+        helpMenu.addItem(item("Report a Problem…", #selector(reportProblem(_:))))
+        main.addItem(withTitle: "Help", action: nil, keyEquivalent: "").submenu = helpMenu
+        NSApp.helpMenu = helpMenu
 
         NSApp.mainMenu = main
     }
 
     @objc func toggleFreeze(_ sender: Any?) { windowController.toggleFreeze() }
     @objc func toggleBlank(_ sender: Any?) { windowController.toggleBlank() }
+    @objc func toggleDrawing(_ sender: Any?) { windowController.toggleDrawing() }
+    @objc func undoDrawing(_ sender: Any?) { windowController.annotations.undo() }
+    @objc func clearDrawings(_ sender: Any?) { windowController.annotations.clear() }
+    @objc func zoomIn(_ sender: Any?) { windowController.zoomIn() }
+    @objc func zoomOut(_ sender: Any?) { windowController.zoomOut() }
+    @objc func resetZoom(_ sender: Any?) { windowController.resetZoom() }
+    @objc func saveSnapshot(_ sender: Any?) { windowController.saveSnapshot() }
+    /// ⌘C when no text field has focus: copy the picture.
+    @objc func copy(_ sender: Any?) { windowController.copySnapshot() }
+    @objc func adjustCrop(_ sender: Any?) { windowController.showCropPanel() }
+
+    @objc func setCropPreset(_ sender: NSMenuItem) {
+        switch sender.tag {
+        case 1: windowController.setCrop(.statusBar)
+        case 2: windowController.setCrop(CropInsets(top: 0.1))
+        default: windowController.setCrop(.none)
+        }
+    }
+
+    @objc func showSnapshots(_ sender: Any?) {
+        let folder = MirrorWindowController.snapshotsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
+
     @objc func showMirrorWindow(_ sender: Any?) {
         windowController.showWindow(nil)
+        NSApp.activate()
+    }
+
+    @objc func checkForUpdates(_ sender: Any?) { Updater.shared.checkNow() }
+    @objc func toggleAutoUpdates(_ sender: Any?) { Updater.shared.setAutomatic(!Settings.autoCheckUpdates) }
+    @objc func openGitHub(_ sender: Any?) { NSWorkspace.shared.open(URL(string: "https://github.com/\(Updater.repo)")!) }
+    @objc func reportProblem(_ sender: Any?) { NSWorkspace.shared.open(URL(string: "https://github.com/\(Updater.repo)/issues/new")!) }
+
+    @objc func showWelcome(_ sender: Any?) {
+        if welcome == nil {
+            let w = WelcomeWindow()
+            w.onClose = { [weak self] autoUpdates in
+                let firstRun = !Settings.hasSeenWelcome
+                Settings.hasSeenWelcome = true
+                Updater.shared.setAutomatic(autoUpdates)
+                if firstRun, autoUpdates, ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] == nil {
+                    Updater.shared.start()
+                }
+                self?.welcome = nil
+            }
+            welcome = w
+        }
+        welcome?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
 
@@ -346,18 +615,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
-        let f = NSMenuItem(title: "Freeze Picture", action: #selector(toggleFreeze(_:)), keyEquivalent: "")
-        f.target = self
-        menu.addItem(f)
-        let b = NSMenuItem(title: "Blank Screen", action: #selector(toggleBlank(_:)), keyEquivalent: "")
-        b.target = self
-        menu.addItem(b)
+        menu.addItem(self.item("Freeze Picture", #selector(toggleFreeze(_:))))
+        menu.addItem(self.item("Blank Screen", #selector(toggleBlank(_:))))
+        menu.addItem(self.item("Draw on Picture", #selector(toggleDrawing(_:))))
+        menu.addItem(self.item("Clear Drawings   (X)", #selector(clearDrawings(_:))))
         menu.addItem(.separator())
-        let w = NSMenuItem(title: "Show Mirror Window", action: #selector(showMirrorWindow(_:)), keyEquivalent: "")
-        w.target = self
-        menu.addItem(w)
+        menu.addItem(self.item("Save Snapshot", #selector(saveSnapshot(_:))))
+        menu.addItem(self.item("Show Mirror Window", #selector(showMirrorWindow(_:))))
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit TutorMirror", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit \(Settings.appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        // Menu bar items show no shortcuts.
+        for i in menu.items { i.keyEquivalent = "" }
         item.menu = menu
         statusItem = item
         updateStatusItem()
@@ -367,8 +635,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let button = statusItem?.button else { return }
         let frozen = windowController.isFrozen, blank = windowController.isBlank
         let symbol = blank ? "rectangle.slash" : frozen ? "snowflake" : "ipad.landscape"
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "TutorMirror")
-        button.title = blank ? " BLANK" : frozen ? " FROZEN" : ""
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: Settings.appName)
+        var title = blank ? " BLANK" : frozen ? " FROZEN" : ""
+        if Settings.isTestCopy { title += " TEST" }
+        button.title = title
         button.contentTintColor = blank ? .systemPurple : frozen ? .systemBlue : nil
     }
 
@@ -388,6 +658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let alert = NSAlert()
         alert.messageText = "Rename Receiver"
         alert.informativeText = "This is the name your iPad or iPhone shows under Screen Mirroring."
+        alert.window.sharingType = .none
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = Settings.receiverName
         alert.accessoryView = field
@@ -403,15 +674,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let wc = windowController
         switch item.action {
-        case #selector(toggleLagMeter(_:)): item.state = windowController?.lagMeterVisible == true ? .on : .off
+        case #selector(toggleLagMeter(_:)): item.state = wc?.lagMeterVisible == true ? .on : .off
         case #selector(toggleAudio(_:)): item.state = Settings.playAudio ? .on : .off
+        case #selector(toggleAutoUpdates(_:)): item.state = Settings.autoCheckUpdates ? .on : .off
         case #selector(toggleFreeze(_:)):
-            item.state = windowController?.isFrozen == true ? .on : .off
+            item.state = wc?.isFrozen == true ? .on : .off
             item.title = "Freeze Picture   (F)"
         case #selector(toggleBlank(_:)):
-            item.state = windowController?.isBlank == true ? .on : .off
+            item.state = wc?.isBlank == true ? .on : .off
             item.title = "Blank Screen   (B)"
+        case #selector(toggleDrawing(_:)):
+            item.state = wc?.isDrawing == true ? .on : .off
+            item.title = "Draw on Picture   (D)"
+        case #selector(undoDrawing(_:)), #selector(clearDrawings(_:)):
+            return wc?.annotations.strokes.isEmpty == false
+        case #selector(resetZoom(_:)):
+            return wc?.isZoomed == true
+        case #selector(setCropPreset(_:)):
+            let c = Settings.crop
+            let preset: CropInsets = item.tag == 1 ? .statusBar : item.tag == 2 ? CropInsets(top: 0.1) : .none
+            item.state = c == preset ? .on : .off
         default: break
         }
         return true
