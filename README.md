@@ -1,72 +1,79 @@
 # TutorMirror
 
-A fast AirPlay screen-mirroring receiver for the Mac, built for teaching online.
-Mirror your iPad or iPhone to your Mac over Wi-Fi, share the mirror window in
-Google Meet, Zoom or Teams, and freeze or blank what your student sees whenever
-you need a moment.
+TutorMirror mirrors an iPad or iPhone to your Mac over AirPlay, with as little
+lag as I could get out of it. I use it to teach online. I share the mirror
+window on the call, and when I need to do something the student shouldn't
+watch, I freeze it.
 
 ## Why I built it
 
-I tutor online. I write on an iPad in Goodnotes and mirror it to my Mac so I can
-share it on a call. The mirroring app I was using worked, but it had enough lag
-that my handwriting trailed behind my pen. It also had no way to stop the
-student seeing everything I did on the iPad, like flipping to the answer key or
-setting up the next question.
+I tutor online and do all my writing on an iPad in Goodnotes, mirrored to my
+Mac so I can share it on Meet. The app I was using worked, but my handwriting
+showed up noticeably behind my pen, which gets annoying fast when you're
+working through a problem live.
 
-So I forked it and rebuilt the video path for speed. Then I added the things I
-actually wanted while teaching:
+The other thing was privacy. Every time I flipped to the answer key or set up
+the next question, the student watched me do it. I wanted a button that just
+holds the picture still.
 
-- **Freeze**: the student sees a still picture while I carry on working on the iPad.
-- **Blank**: the student sees "One moment…" while I set something up.
-- **A lag meter** so I can see where the delay comes from.
-- **Tags and meters only I can see**: they're left out of screen sharing.
+So I forked [VirtualMirror](https://github.com/souriscloud/VirtualMirror),
+rewrote the video side to be faster, and added freeze. A few things came
+along with it: a blank "One moment…" screen, and a lag meter so I could see
+where the delay comes from. The freeze and blank labels and the lag meter
+only show on my screen. Screen sharing doesn't pick them up.
 
-## What makes it faster
+## Why it's faster
 
-TutorMirror is a fork of [VirtualMirror](https://github.com/souriscloud/VirtualMirror).
-The AirPlay connection code is theirs. Everything after the network (the
-decoding and drawing) was rewritten for low delay:
+The AirPlay connection code is VirtualMirror's. I rewrote everything after
+that, meaning how frames get decoded and drawn:
 
 | | TutorMirror | VirtualMirror |
 |---|---|---|
-| Frame rate asked from the device | **60 fps** | 30 fps |
-| Picture size asked for | **2048×1536** (4:3, sharp on iPad, no black bars) | 1920×1080 |
-| Colour conversion | none: native YUV drawn by a Metal shader | BGRA conversion every frame |
-| Path to the screen | decode thread → Metal, newest frame always wins | decode → main thread → SwiftUI → display layer |
-| Network packets | parsed in place, decrypted straight into the decoder | several copies per frame |
+| Frame rate it asks the device for | 60 fps | 30 fps |
+| Picture size it asks for | 2048×1536 (iPad shaped, so no black bars) | 1920×1080 |
+| Colour conversion | none, a Metal shader draws the raw YUV | converts every frame to BGRA |
+| Route to the screen | straight from the decoder to Metal, and only the newest frame gets drawn | decoder, then main thread, then SwiftUI, then a display layer |
+| Network packets | read where they land, decrypted straight into the decoder's buffer | copied several times per frame |
+
+The frame rate is the big one. Asking for 60 instead of 30 halves the time
+between frames, and writing looks a lot smoother.
 
 On my setup (iPad Pro, MacBook Pro, 120 Hz monitor, 5 GHz
-Wi-Fi), each frame takes about 3–4 ms to decode and about 16 ms to reach the
-screen. The Wi-Fi round trip is about 11 ms. Your numbers depend mostly on your
-Wi-Fi.
+Wi-Fi), decoding a frame takes about 3–4 ms and getting it on screen takes
+about 16 ms. The Wi-Fi round trip is around 11 ms. Your Wi-Fi will matter more
+than anything else.
 
-## Requirements
+## What you need
 
-- A Mac running **macOS 14 Sonoma or later** (Apple Silicon or Intel)
-- An **iPad or iPhone** on the same Wi-Fi network
-- Turning off macOS's own receiver helps avoid confusion: System Settings →
-  General → AirDrop & Handoff → **AirPlay Receiver** off
+- A Mac on macOS 14 (Sonoma) or newer. Apple Silicon and Intel both work.
+- An iPad or iPhone on the same Wi-Fi.
+- Optional: turn off the Mac's built-in receiver (System Settings → General →
+  AirDrop & Handoff → AirPlay Receiver) so you don't pick the wrong one from the list.
 
 ## Install
 
-### Option 1: download (easiest)
+### Download it
 
-1. Download `TutorMirror.zip` from the [latest release](../../releases/latest) and unzip it.
-2. Move **TutorMirror.app** to your Applications folder.
-3. The app isn't from the App Store, so the first time you open it, macOS will
-   block it. Go to System Settings → Privacy & Security, scroll down and click
-   **Open Anyway**. Or run this once in Terminal:
+1. Grab `TutorMirror.zip` from the [latest release](../../releases/latest),
+   unzip it and drag TutorMirror.app into Applications.
+2. I can't be asked paying £79 a year to Apple, so run this command in
+   Terminal instead:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/TutorMirror.app
    ```
 
-4. When macOS asks whether TutorMirror can find devices on your local network,
-   click **Allow**. Without it, your iPad can't see the Mac.
+   (Otherwise macOS will block it the first time you open it.)
 
-### Option 2: build it yourself
+   Or go to System Settings → Privacy & Security, scroll down and click
+   Open Anyway.
 
-You need Xcode (or its command-line tools).
+3. When it asks to find devices on your local network, say Allow. If you
+   don't, your iPad won't be able to see it.
+
+### Or build it
+
+You'll need Xcode or its command line tools.
 
 ```bash
 git clone https://github.com/t7acct/tutor-mirror.git
@@ -74,42 +81,43 @@ cd tutor-mirror
 ./build.sh --run
 ```
 
-`./build.sh --release` makes a universal (Apple Silicon + Intel) zip in `build/`.
+`./build.sh --release` makes a zip that runs on both Apple Silicon and Intel.
 
-## How to use it
+## Using it
 
-1. Open TutorMirror on the Mac.
-2. On the iPad or iPhone, open Control Center → **Screen Mirroring** → **TutorMirror**.
-3. In your video call, share **the TutorMirror window** (not your whole screen).
+1. Open TutorMirror.
+2. On the iPad or iPhone: Control Center → Screen Mirroring → TutorMirror.
+3. On your call, share the TutorMirror window, not your whole screen.
 
-Click the TutorMirror window, then use:
+Then click the TutorMirror window and use these keys:
 
 | Key | Your student sees | You see |
 |---|---|---|
-| **F** | a still picture (press F again to go live) | a blue FROZEN tag |
-| **B** | a "One moment…" screen (press B again to undo) | a purple BLANK tag |
-| **⌘L** | nothing | the lag meter |
-| **⌃⌘F** | the mirror full screen | |
+| F | the picture stops (F again goes live) | a blue FROZEN label |
+| B | a "One moment…" screen (B again to undo) | a purple BLANK label |
+| ⌘L | nothing | the lag meter |
+| ⌃⌘F | the mirror, full screen | |
 
-These are single keys, and they only work while the TutorMirror window is in
-front, so typing in other apps is unaffected. Freeze and Blank are also in the
-View menu and the menu bar icon.
+The keys only work while the TutorMirror window is in front, so you can still
+type F and B in other apps. Freeze and Blank are also in the View menu and in
+the menu bar icon.
 
-While frozen, you can do anything on the iPad: flip pages, rotate it, lock it,
-even disconnect. The student keeps seeing the frozen picture. Going live again
-is instant, because the app keeps decoding in the background.
+Once you've frozen it, you can do whatever you like on the iPad. Flip pages,
+rotate it, lock it, disconnect it. The student keeps seeing the still picture.
+The app keeps decoding in the background while frozen, so going live again is
+instant.
 
-**Tip:** if you share your *whole screen* instead of the window, your student
-can see your menu bar, including the menu bar icon's FROZEN label. Share the
-window.
+If you share your whole screen instead of the window, the student can see your
+menu bar, and the menu bar icon says FROZEN when it's frozen. Share the window.
 
 ## Settings
 
-- **Rename the receiver**: View → Rename Receiver… (the name your device shows
-  under Screen Mirroring)
-- **iPad audio**: off by default, turn it on under View → Play iPad Audio
+Rename the receiver (the name in your device's Screen Mirroring list) under
+View → Rename Receiver…. iPad audio is off by default. Turn it on with View →
+Play iPad Audio.
 
-Advanced settings live in `defaults` (reconnect your device after changing them):
+There are a few more settings in `defaults`. Reconnect your device after
+changing them.
 
 ```bash
 defaults write local.tutormirror maxFPS -int 120         # ask for 120 fps (most devices still send 60)
@@ -118,44 +126,44 @@ defaults write local.tutormirror streamHeight -int 2048
 defaults delete local.tutormirror                        # back to defaults
 ```
 
-To see the lag numbers from a session afterwards:
+To look at the lag numbers after a session:
 
 ```bash
 log show --last 10m --predicate 'subsystem == "local.tutormirror" AND category == "Lag"'
 ```
 
-## What works
+## What works and what doesn't
 
-- **iPad and iPhone screen mirroring.** I've tested it with an iPad Pro running
-  Goodnotes. Other iPads and iPhones use the same protocol and should work. The
-  window reshapes itself for portrait, landscape and phone screens.
-- **One device at a time.** A new device replaces the current one.
-- **Not supported:** AirPlay video "casting" (sending a YouTube video to the TV),
-  audio-only AirPlay from Music, and 4K/H.265 streams. TutorMirror is for
-  screen mirroring.
+I've only tested it with my iPad Pro running Goodnotes. Other iPads and
+iPhones speak the same protocol, so they should be fine, and the window
+reshapes itself for portrait, landscape and phones. If something breaks on
+your device, open an issue.
 
-If your device can't see TutorMirror: check both devices are on the same
-network, check TutorMirror is allowed under System Settings → Privacy &
-Security → Local Network, and try View → Restart Receiver.
+It handles one device at a time. If a second one connects, it takes over.
 
-## Roadmap
+It only does screen mirroring. Casting a YouTube video, audio-only AirPlay
+from Music and 4K/H.265 streams won't work.
 
-- Crop out the iPad status bar and app toolbars, so students see just the page
-- Draw boxes, arrows and highlights on the mirror from the Mac
-- Zoom and spotlight, and save snapshots of the board after a lesson
+If your device can't find TutorMirror, check they're on the same network,
+check TutorMirror is allowed under System Settings → Privacy & Security →
+Local Network, and try View → Restart Receiver.
+
+## What I want to add next
+
+- Cropping out the iPad status bar and the Goodnotes toolbar, so students only see the page
+- Drawing boxes and arrows on the mirror from the Mac
+- Zooming into part of the page, and saving the board at the end of a lesson
 
 ## Credits and licence
 
-TutorMirror is a modified version of
-[VirtualMirror](https://github.com/souriscloud/VirtualMirror) by Souris.CLOUD.
-The commit it's based on is in `UPSTREAM.txt`. VirtualMirror builds on
+This is a modified version of
+[VirtualMirror](https://github.com/souriscloud/VirtualMirror) by Souris.CLOUD
+(the exact commit is in `UPSTREAM.txt`), which builds on
 [UxPlay](https://github.com/FDH2/UxPlay), [RPiPlay](https://github.com/FD-/RPiPlay)
-and [shairplay](https://github.com/juhovh/shairplay); see
-`ACKNOWLEDGMENTS-VirtualMirror.md`. Changes from VirtualMirror: the video
-receive, decode and display code (`Sources/Video`) and the app and tutoring
-features (`Sources/App`) are rewritten or new. The protocol code is adapted with
-small changes.
+and [shairplay](https://github.com/juhovh/shairplay). See
+`ACKNOWLEDGMENTS-VirtualMirror.md`. I rewrote the video code in `Sources/Video`
+and wrote the app and tutoring features in `Sources/App`. The protocol code
+is theirs, with small changes.
 
-Licensed under the GNU General Public License v3.0 (see `LICENSE`), like the
-projects it builds on. This project isn't affiliated with Apple. AirPlay, iPad
-and iPhone are trademarks of Apple Inc.
+GPL-3.0, same as the projects it's built on (see `LICENSE`). Not affiliated
+with Apple. AirPlay, iPad and iPhone are Apple trademarks.
