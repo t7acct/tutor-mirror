@@ -200,9 +200,13 @@ iPhones speak the same protocol, so they should be fine, and the window
 reshapes itself for portrait, landscape and phones. If something breaks on
 your device, open an issue.
 
-It handles one device at a time. If a second one connects, it takes over, so
-don't use it on a network you share with people who might pick it from their
-Screen Mirroring list.
+It handles one device at a time. While your iPad is mirroring, another
+device that picks TutorMirror from its Screen Mirroring list is turned away
+(it shows "unable to connect"), and only you see a short note saying who it
+was. Your own iPad can always reconnect, after a lock, a rotation or a Wi-Fi
+blip. Once your iPad stops mirroring, or has sent nothing for a few seconds,
+another device can connect. To let any device take over at any time, turn on
+View → Let Other Devices Take Over.
 
 Goodnotes' presentation mode works too: the iPad keeps its toolbar and the
 student only sees the page. TutorMirror tells the iPad it's a widescreen
