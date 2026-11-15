@@ -36,12 +36,12 @@ final class WelcomeWindow: NSWindow {
                      "On the iPad, open Control Center → Screen Mirroring → \(name). Keep both on the same Wi-Fi. If macOS asks to find devices on your local network, click Allow."),
             Self.row("rectangle.inset.filled.and.person.filled", "Share the window, not the screen",
                      "In Meet, Zoom or Teams, share the \(Settings.appName) window. The student then sees only the iPad: the window has no title bar. Drag the picture to move it."),
-            Self.row("snowflake", "Freeze or blank it",
-                     "Click the mirror window, then press F to hold the picture still while you flip to the answers, or B for a \"One moment…\" screen. Press again to go live."),
+            Self.row(MirrorHoldMode.frozen.symbol, "Freeze or blank it",
+                     "Click the mirror window, then press F to hold the picture still while you flip to the answers, or B for a \"One moment…\" screen. Press F again to go live or B again to show the picture."),
             Self.row("pencil.tip.crop.circle", "Draw, zoom, crop and save",
                      "D draws on the picture, pinch or ⌘-scroll zooms in, View → Crop hides the status bar, and ⌘S saves the board to Pictures."),
             Self.row("eye.slash", "Some things are just for you",
-                     "Your mouse pointer over the mirror, the FROZEN label, the lag meter (⌘L), the drawing toolbar and this window never show up in screen sharing."),
+                     "Your mouse pointer over the mirror, the freeze and blank badges, the lag meter (⌘L), the drawing toolbar and this window never show up in screen sharing."),
         ]
         let rowStack = NSStackView(views: rows)
         rowStack.orientation = .vertical

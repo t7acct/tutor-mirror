@@ -12,8 +12,8 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     /// Shown under an error (port taken, no Local Network access).
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private let lagMeter = LagMeterPanel()
-    private let badge = BadgePanel()
-    private let blankOverlay = NSView()
+    let badge = BadgePanel()
+    let blankOverlay = BlankScreenView()
     let annotations = AnnotationView()
     /// Hides your mouse pointer from the student while it's over the mirror.
     let pointer: PointerHider
@@ -113,20 +113,9 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         ])
 
         // "Blank" screen: what the student sees while you set something up.
-        blankOverlay.wantsLayer = true
-        blankOverlay.layer?.backgroundColor = NSColor(calibratedRed: 0.11, green: 0.12, blue: 0.14, alpha: 1).cgColor
         blankOverlay.autoresizingMask = [.width, .height]
         blankOverlay.frame = container.bounds
         blankOverlay.isHidden = true
-        let blankLabel = NSTextField(labelWithString: "One moment…")
-        blankLabel.font = .systemFont(ofSize: 34, weight: .medium)
-        blankLabel.textColor = .init(white: 0.85, alpha: 1)
-        blankLabel.translatesAutoresizingMaskIntoConstraints = false
-        blankOverlay.addSubview(blankLabel)
-        NSLayoutConstraint.activate([
-            blankLabel.centerXAnchor.constraint(equalTo: blankOverlay.centerXAnchor),
-            blankLabel.centerYAnchor.constraint(equalTo: blankOverlay.centerYAnchor),
-        ])
         container.addSubview(blankOverlay)
 
         manager.videoDecoder.sink = videoView
@@ -211,6 +200,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Freeze / blank
 
     var isFrozen: Bool { videoView.isFrozen }
+    var holdMode: MirrorHoldMode? { isBlank ? .blank : (isFrozen ? .frozen : nil) }
 
     func toggleFreeze() { setFrozen(!videoView.isFrozen) }
 
@@ -231,10 +221,8 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         let zoom = videoView.zoomScale
         if let toast {
             badge.show(text: toast.text, color: toast.color, over: window)
-        } else if isBlank {
-            badge.show(text: "BLANK — student sees \"One moment…\"   press B to undo", color: .systemPurple, over: window)
-        } else if isFrozen {
-            badge.show(text: "❄︎ FROZEN — student sees a still picture   press F to go live", color: .systemBlue, over: window)
+        } else if let holdMode {
+            badge.show(mode: holdMode, over: window)
         } else if zoom > 1.01 {
             badge.show(text: String(format: "ZOOMED %.1f×   press 0 to see the whole page", zoom), color: .systemGray, over: window)
         } else {
@@ -681,13 +669,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        let frozen = windowController.isFrozen, blank = windowController.isBlank
-        let symbol = blank ? "rectangle.slash" : frozen ? "snowflake" : "ipad.landscape"
+        let mode = windowController.holdMode
+        let symbol = mode?.symbol ?? "ipad.landscape"
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: Settings.appName)
-        var title = blank ? " BLANK" : frozen ? " FROZEN" : ""
+        var title = mode.map { " " + $0.rawValue.uppercased() } ?? ""
         if Settings.isTestCopy { title += " TEST" }
         button.title = title
-        button.contentTintColor = blank ? .systemPurple : frozen ? .systemBlue : nil
+        button.contentTintColor = mode.map { $0 == .blank ? .systemPurple : .systemBlue }
     }
 
     @objc func toggleLagMeter(_ sender: Any?) {

@@ -66,6 +66,16 @@ final class UICheck {
         check(window.sharingType == .none, "\(name) is hidden from screen sharing")
     }
 
+    private func render(_ view: NSView, _ name: String) {
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            check(false, "image \(name)")
+            return
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        save(rep.cgImage, name)
+    }
+
     private func wait(_ seconds: Double) async {
         try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
     }
@@ -104,6 +114,32 @@ final class UICheck {
         check(v.convert(v.bounds, to: nil).size == mw.frame.size, "the picture fills the whole window (\(v.bounds.size) in \(mw.frame.size))")
         check(near(mw.frame.width / mw.frame.height, 2048.0 / 1536), "the window keeps the iPad's shape (\(mw.frame.size))")
         check(!mw.title.isEmpty, "the window still has a name for Meet's window list (\(mw.title))")
+
+        // Freeze leaves the picture shared. Blank must cover the picture and
+        // drawings, including when the tutor blanks an already frozen frame.
+        wc.badge.alphaValue = 0
+        let blankScreen = wc.blankOverlay
+        wc.setFrozen(true)
+        check(wc.holdMode == .frozen && blankScreen.isHidden, "freeze keeps the shared picture visible")
+        render(wc.badge, "freeze-badge")
+        wc.toggleBlank()
+        check(wc.holdMode == .blank && !blankScreen.isHidden, "blank takes precedence over freeze")
+        check(blankScreen.isOpaque && blankScreen.frame == mw.contentView?.bounds &&
+              mw.contentView?.subviews.last === blankScreen, "the holding screen covers the entire shared picture")
+        check(wc.snapshotImage() == nil, "blank does not expose the hidden picture in snapshots")
+        render(blankScreen, "blank-screen")
+        render(wc.badge, "blank-badge")
+
+        let compactBlank = BlankScreenView()
+        compactBlank.setFrameSize(NSSize(width: 230, height: 300))
+        render(compactBlank, "blank-screen-compact")
+        check(compactBlank.subviews.allSatisfy { compactBlank.bounds.contains($0.frame) },
+              "the holding screen fits a small portrait window")
+
+        wc.toggleBlank()
+        check(wc.holdMode == .frozen && blankScreen.isHidden, "unblank restores the frozen picture")
+        wc.setFrozen(false)
+        check(wc.holdMode == nil && !wc.badge.isVisible, "going live dismisses the private status panel")
 
         wc.setCrop(.statusBar)
         await wait(0.3)

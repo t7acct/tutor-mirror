@@ -23,7 +23,7 @@ watch, I freeze it.
   the app's name never appears.
 - Hides your mouse pointer from the student while it's over the mirror. You
   still see it.
-- Keeps the FROZEN label, the drawing toolbar and the lag meter on your
+- Keeps the freeze and blank badges, the drawing toolbar and the lag meter on your
   screen only. Screen sharing leaves them out.
 - Turns away other devices that try to take over mid-lesson. Your own iPad
   can always reconnect.
@@ -151,8 +151,8 @@ Then click the TutorMirror window and use these keys:
 
 | Key | Your student sees | You see |
 |---|---|---|
-| F | the picture stops (F again goes live) | a blue FROZEN label |
-| B | a "One moment…" screen (B again to undo) | a purple BLANK label |
+| F | the picture stops (F again goes live) | a blue pause badge with the shortcut to go live |
+| B | a "One moment…" screen (B again to undo) | a purple badge with the shortcut to show the picture |
 | D | your drawings | the drawing toolbar |
 | X | the drawings disappear | |
 | = and - | the picture zoomed in or out | a grey ZOOMED label |
