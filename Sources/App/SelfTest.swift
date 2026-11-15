@@ -18,7 +18,7 @@ final class SelfTest: @unchecked Sendable {
 
     init(decoder: VideoDecoder) { self.decoder = decoder }
 
-    func start() {
+    func start(continuous: Bool = true) {
         let st = VTCompressionSessionCreate(
             allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil,
@@ -27,6 +27,7 @@ final class SelfTest: @unchecked Sendable {
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
+        guard continuous else { return }
 
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + 0.5, repeating: 1.0 / 60.0, leeway: .milliseconds(1))
@@ -35,7 +36,21 @@ final class SelfTest: @unchecked Sendable {
         timer = t
     }
 
-    private func encodeNext() {
+    /// In the headless check, send one frame and wait for it to reach the renderer.
+    func sendFrame(color: CGColor? = nil) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                if let encoder = self.encoder {
+                    self.encodeNext(color: color)
+                    VTCompressionSessionCompleteFrames(encoder, untilPresentationTimeStamp: .invalid)
+                    self.decoder.waitForPendingFrames()
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    private func encodeNext(color: CGColor? = nil) {
         if frame > 0 && frame % 120 == 0 {
             let s = LatencyStats.shared.summary()
             func ms(_ v: Double) -> String { String(format: "%.1f", v * 1000) }
@@ -45,7 +60,7 @@ final class SelfTest: @unchecked Sendable {
                   + " netExtra=\(ms(s.netExtra.avg))/p95 \(ms(s.netExtra.p95))")
             fflush(stdout)
         }
-        guard let encoder, let pb = makePattern() else { return }
+        guard let encoder, let pb = makePattern(color: color) else { return }
         let pts = CMTime(value: CMTimeValue(frame), timescale: 60)
         frame += 1
         let sentHost = HostTime.now
@@ -78,7 +93,7 @@ final class SelfTest: @unchecked Sendable {
     }
 
     /// Moving colour bars + a sweeping white bar, so colour errors and stutter are obvious.
-    private func makePattern() -> CVPixelBuffer? {
+    private func makePattern(color: CGColor?) -> CVPixelBuffer? {
         var pb: CVPixelBuffer?
         CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
                             [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pb)
@@ -89,6 +104,11 @@ final class SelfTest: @unchecked Sendable {
                                   bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
         else { return nil }
+        if let color {
+            ctx.setFillColor(color)
+            ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            return pb
+        }
         let colors: [(CGFloat, CGFloat, CGFloat)] = [(1,1,1),(1,1,0),(0,1,1),(0,1,0),(1,0,1),(1,0,0),(0,0,1),(0,0,0)]
         let barW = CGFloat(width) / CGFloat(colors.count)
         for (i, c) in colors.enumerated() {

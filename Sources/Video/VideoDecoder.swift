@@ -156,6 +156,12 @@ final class VideoDecoder: @unchecked Sendable {
 
     // MARK: - Decode
 
+    /// Lets the headless check inspect the renderer after a known input frame.
+    func waitForPendingFrames() {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        if let session { VTDecompressionSessionWaitForAsynchronousFrames(session) }
+    }
+
     /// `block` holds decrypted, length-prefixed NAL units for one frame.
     func decode(block: CMBlockBuffer, size: Int, timing: FrameTiming) {
         sessionLock.lock(); defer { sessionLock.unlock() }

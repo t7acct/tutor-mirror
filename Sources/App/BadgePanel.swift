@@ -87,7 +87,7 @@ final class BadgePanel: NSPanel {
         present(over: window)
     }
 
-    func show(text: String, color: NSColor, over window: NSWindow) {
+    func show(text: String, color: NSColor, over window: NSWindow, below upperBadge: BadgePanel? = nil) {
         mode = nil
         label.stringValue = text
         label.font = .systemFont(ofSize: 14, weight: .bold)
@@ -95,19 +95,20 @@ final class BadgePanel: NSPanel {
         box.layer?.borderWidth = 0
         box.layer?.cornerRadius = 8
         box.layer?.backgroundColor = color.withAlphaComponent(0.92).cgColor
-        present(over: window)
+        present(over: window, below: upperBadge)
     }
 
-    private func present(over window: NSWindow) {
-        reposition(over: window)
+    private func present(over window: NSWindow, below upperBadge: BadgePanel? = nil) {
+        reposition(over: window, below: upperBadge)
         orderFrontRegardless()
     }
 
-    func reposition(over window: NSWindow) {
+    func reposition(over window: NSWindow, below upperBadge: BadgePanel? = nil) {
         let content = window.contentLayoutRect
         layoutContents(maxWidth: max(1, content.width - 20))
         let topCenter = window.convertPoint(toScreen: NSPoint(x: content.midX, y: content.maxY - 10))
-        setFrameTopLeftPoint(NSPoint(x: topCenter.x - frame.width / 2, y: topCenter.y))
+        let top = upperBadge.map { $0.frame.minY - 8 } ?? topCenter.y
+        setFrameTopLeftPoint(NSPoint(x: topCenter.x - frame.width / 2, y: top))
     }
 
     private func layoutContents(maxWidth: CGFloat) {
@@ -117,7 +118,7 @@ final class BadgePanel: NSPanel {
         let padding: CGFloat = showsMode ? 10 : 14
         let iconSpace: CGFloat = 42
         let textEnd = padding + (showsMode ? 38 : 0)
-        let textWidth = showsMode ? max(titleSize.width, actionSize.width) + 8 : titleSize.width
+        let textWidth = (showsMode ? max(titleSize.width, actionSize.width) : titleSize.width) + 8
         let showsIcon = showsMode && padding + iconSpace + textWidth + textEnd <= maxWidth
         let textStart = padding + (showsIcon ? iconSpace : 0)
         let width = min(maxWidth, ceil(textStart + textWidth + textEnd))

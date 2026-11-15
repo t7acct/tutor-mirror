@@ -82,6 +82,103 @@ final class UICheck {
 
     private func near(_ a: Double, _ b: Double, _ tol: Double = 0.01) -> Bool { abs(a - b) <= tol * max(1, abs(b)) }
 
+    private func press(_ key: String, code: UInt16, in window: NSWindow, repeating: Bool = false) -> Bool {
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                          windowNumber: window.windowNumber, context: nil, characters: key,
+                                          charactersIgnoringModifiers: key, isARepeat: repeating, keyCode: code) else {
+            return false
+        }
+        return app.handleKey(event)
+    }
+
+    private func checkHoldModes(_ wc: MirrorWindowController, source: SelfTest) async {
+        // Submit distinctly coloured frames one at a time through VideoToolbox.
+        // The offscreen shader reads the same retained frame as the window.
+        let sampleSize = CGSize(width: 64, height: 48)
+        func picture() -> CGImage? { wc.videoView.renderOffscreen(size: sampleSize) }
+        func pixels(_ image: CGImage?) -> Data? { image?.dataProvider?.data.map { $0 as Data } }
+
+        wc.badge.alphaValue = 0
+        wc.toastBadge.alphaValue = 0
+        let mw = wc.window!
+        let blankScreen = wc.blankOverlay
+        check(press("f", code: 3, in: mw) && wc.holdMode == .frozen && blankScreen.isHidden,
+              "F freezes the shared picture")
+        check(press("f", code: 3, in: mw, repeating: true) && wc.isFrozen,
+              "holding F keeps the picture frozen")
+        render(wc.badge, "freeze-badge")
+
+        let frozenPixels = pixels(picture())
+        await source.sendFrame(color: CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let afterRed = pixels(picture())
+        await source.sendFrame(color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        check(app.manager.videoDecoder.statsSnapshot().totalFrames == 3, "the decoder accepted all three test frames")
+        check(frozenPixels != nil && afterRed == frozenPixels && pixels(picture()) == frozenPixels,
+              "the rendered picture stays pixel-identical while new frames arrive")
+
+        check(press("b", code: 11, in: mw) && wc.holdMode == .blank && !blankScreen.isHidden,
+              "B blanks an already frozen picture")
+        check(press("b", code: 11, in: mw, repeating: true) && wc.isBlank && !blankScreen.isHidden,
+              "holding B keeps the shared picture covered")
+        check(blankScreen.isOpaque && blankScreen.frame == mw.contentView?.bounds &&
+              mw.contentView?.subviews.last === blankScreen, "the holding screen covers the entire shared picture")
+        check(wc.snapshotImage() == nil, "blank does not expose the hidden picture in snapshots")
+        render(blankScreen, "blank-screen")
+        render(wc.badge, "blank-badge")
+
+        let compactBlank = BlankScreenView()
+        compactBlank.setFrameSize(NSSize(width: 230, height: 300))
+        render(compactBlank, "blank-screen-compact")
+        check(compactBlank.subviews.allSatisfy { compactBlank.bounds.contains($0.frame) },
+              "the holding screen fits a small portrait window")
+
+        await checkNotifications(wc)
+        check(press("b", code: 11, in: mw) && wc.holdMode == .frozen && blankScreen.isHidden &&
+              frozenPixels != nil && pixels(picture()) == frozenPixels, "unblank restores the same frozen frame")
+        check(press("f", code: 3, in: mw) && wc.holdMode == nil && !wc.badge.isVisible,
+              "a second F press resumes and dismisses the private status panel")
+
+        // Sample the centre of the resumed BGRA image. Blue was sent last,
+        // before F was pressed, and no frames have been sent since.
+        let resumed = picture()
+        save(resumed, "render-resumed")
+        let center = resumed.flatMap { image in
+            pixels(image).map { bytes in
+                let i = (image.height / 2) * image.bytesPerRow + (image.width / 2) * 4
+                return Array(bytes[i..<(i + 3)])
+            }
+        }
+        // The codec can shift the exact RGB values. Check that blue dominates.
+        let isBlue = center.map { $0[0] > 180 && Int($0[0]) > 2 * Int(max($0[1], $0[2])) } ?? false
+        check(isBlue, "resume renders the newest frame received during freeze (BGR \(center ?? []))")
+        check(press("=", code: 24, in: mw, repeating: true) && wc.isZoomed, "holding the zoom key still zooms")
+        wc.resetZoom()
+    }
+
+    private func checkNotifications(_ wc: MirrorWindowController) async {
+        wc.showToast("Nothing to save while blank", color: .systemOrange, for: 1)
+        check(wc.badge.isVisible && wc.holdMode == .blank && wc.toastBadge.isVisible &&
+              wc.toastBadge.frame.maxY < wc.badge.frame.minY,
+              "blank status stays visible above a notification")
+        render(wc.toastBadge, "toast-badge")
+        wc.showToast("Brief replacement", for: 0.15)
+        await wait(0.35)
+        check(wc.toast == nil && !wc.toastBadge.isVisible && wc.badge.isVisible,
+              "the replacement expires and leaves the blank badge visible")
+
+        wc.showToast("Latest", for: 1.4)
+        wc.toggleBlank()
+        check(wc.badge.isVisible && wc.holdMode == .frozen && wc.toastBadge.isVisible,
+              "freeze status stays visible during a notification")
+        await wait(0.8)
+        check(wc.toast?.text == "Latest" && wc.toastBadge.isVisible,
+              "the original notification timer cannot dismiss the latest notification")
+        await wait(0.75)
+        check(wc.toast == nil && !wc.toastBadge.isVisible && wc.badge.isVisible,
+              "the latest notification expires and leaves the freeze badge visible")
+        wc.toggleBlank()
+    }
+
     private func steps() async {
         // Version comparison
         check(Updater.isVersion("0.2.0", newerThan: "0.1.1"), "0.2.0 > 0.1.1")
@@ -99,11 +196,14 @@ final class UICheck {
         let wc = app.windowController!
         render(wc.drawToolbar, "draw-toolbar")
 
-        // Video: wait for the self-test pattern to come through the decoder.
-        await wait(2)
+        let source = SelfTest(decoder: app.manager.videoDecoder)
+        source.start(continuous: false)
+        await source.sendFrame()
         let v = wc.videoView
-        check(v.croppedVideoSize == CGSize(width: 2048, height: 1536), "stream is 2048×1536 uncropped")
+        wc.setCrop(.none)
         save(v.renderOffscreen(size: CGSize(width: 1024, height: 768)), "render-full")
+        await wait(0.2) // Apply the window resize dispatched by the renderer.
+        check(v.croppedVideoSize == CGSize(width: 2048, height: 1536), "stream is 2048×1536 uncropped")
 
         // The student sees the whole shared window, title bar included, so the
         // title bar shows nothing and the picture fills the window.
@@ -115,31 +215,8 @@ final class UICheck {
         check(near(mw.frame.width / mw.frame.height, 2048.0 / 1536), "the window keeps the iPad's shape (\(mw.frame.size))")
         check(!mw.title.isEmpty, "the window still has a name for Meet's window list (\(mw.title))")
 
-        // Freeze leaves the picture shared. Blank must cover the picture and
-        // drawings, including when the tutor blanks an already frozen frame.
-        wc.badge.alphaValue = 0
-        let blankScreen = wc.blankOverlay
-        wc.setFrozen(true)
-        check(wc.holdMode == .frozen && blankScreen.isHidden, "freeze keeps the shared picture visible")
-        render(wc.badge, "freeze-badge")
-        wc.toggleBlank()
-        check(wc.holdMode == .blank && !blankScreen.isHidden, "blank takes precedence over freeze")
-        check(blankScreen.isOpaque && blankScreen.frame == mw.contentView?.bounds &&
-              mw.contentView?.subviews.last === blankScreen, "the holding screen covers the entire shared picture")
-        check(wc.snapshotImage() == nil, "blank does not expose the hidden picture in snapshots")
-        render(blankScreen, "blank-screen")
-        render(wc.badge, "blank-badge")
-
-        let compactBlank = BlankScreenView()
-        compactBlank.setFrameSize(NSSize(width: 230, height: 300))
-        render(compactBlank, "blank-screen-compact")
-        check(compactBlank.subviews.allSatisfy { compactBlank.bounds.contains($0.frame) },
-              "the holding screen fits a small portrait window")
-
-        wc.toggleBlank()
-        check(wc.holdMode == .frozen && blankScreen.isHidden, "unblank restores the frozen picture")
-        wc.setFrozen(false)
-        check(wc.holdMode == nil && !wc.badge.isVisible, "going live dismisses the private status panel")
+        await checkHoldModes(wc, source: source)
+        await source.sendFrame() // Restore the colour bars for the crop and snapshot checks.
 
         wc.setCrop(.statusBar)
         await wait(0.3)

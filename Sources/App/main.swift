@@ -13,13 +13,15 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private let lagMeter = LagMeterPanel()
     let badge = BadgePanel()
+    let toastBadge = BadgePanel()
     let blankOverlay = BlankScreenView()
     let annotations = AnnotationView()
     /// Hides your mouse pointer from the student while it's over the mirror.
     let pointer: PointerHider
     private(set) lazy var drawToolbar = DrawToolbarPanel(annotations: annotations)
     private(set) var cropPanel: CropPanel?
-    private(set) var toast: (text: String, color: NSColor, id: Int)?
+    private(set) var toast: (text: String, color: NSColor)?
+    private var toastTimer: Timer?
     private(set) var isBlank = false
     /// Called whenever freeze/blank changes (menu bar icon).
     var onModeChange: (() -> Void)?
@@ -218,29 +220,46 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateBadge() {
         guard let window else { return }
+        defer { onModeChange?() }
+        guard window.isVisible, !window.isMiniaturized else {
+            hideBadges()
+            return
+        }
         let zoom = videoView.zoomScale
-        if let toast {
-            badge.show(text: toast.text, color: toast.color, over: window)
-        } else if let holdMode {
+        if let holdMode {
             badge.show(mode: holdMode, over: window)
-        } else if zoom > 1.01 {
+        } else if toast == nil, zoom > 1.01 {
             badge.show(text: String(format: "ZOOMED %.1f×   press 0 to see the whole page", zoom), color: .systemGray, over: window)
         } else {
             badge.orderOut(nil)
         }
-        onModeChange?()
+
+        if let toast {
+            toastBadge.show(text: toast.text, color: toast.color, over: window, below: badge.isVisible ? badge : nil)
+        } else {
+            toastBadge.orderOut(nil)
+        }
+    }
+
+    private func hideBadges() {
+        badge.orderOut(nil)
+        toastBadge.orderOut(nil)
     }
 
     /// A short message on the tutor-only badge (e.g. "Snapshot saved").
     func showToast(_ text: String, color: NSColor = .systemGreen, for seconds: TimeInterval = 2.5) {
-        let id = (toast?.id ?? 0) + 1
-        toast = (text, color, id)
+        toastTimer?.invalidate()
+        toast = (text, color)
         updateBadge()
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self, self.toast?.id == id else { return }
-            self.toast = nil
-            self.updateBadge()
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.toast = nil
+                self?.toastTimer = nil
+                self?.updateBadge()
+            }
         }
+        toastTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     // MARK: Drawing
@@ -373,13 +392,15 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) { repositionPanels() }
     func windowDidMove(_ notification: Notification) { repositionPanels() }
-    func windowDidMiniaturize(_ notification: Notification) { badge.orderOut(nil) }
+    func windowDidMiniaturize(_ notification: Notification) { hideBadges() }
     func windowDidDeminiaturize(_ notification: Notification) { updateBadge() }
 
     private func repositionPanels() {
         lagMeter.reposition()
         if drawToolbar.parent != nil { drawToolbar.reposition() }
-        if badge.isVisible, let window { badge.reposition(over: window) }
+        guard let window else { return }
+        if badge.isVisible { badge.reposition(over: window) }
+        if toastBadge.isVisible { toastBadge.reposition(over: window, below: badge.isVisible ? badge : nil) }
     }
 }
 
@@ -424,8 +445,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             windowController.window?.alphaValue = 0
             windowController.window?.ignoresMouseEvents = true
             manager.state = .mirroring("Self-test")
-            selfTest = SelfTest(decoder: manager.videoDecoder)
-            selfTest?.start()
             UICheck(app: self).run()
             return
         }
@@ -473,10 +492,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Keys
 
     /// Returns true if the key was used.
-    private func handleKey(_ event: NSEvent) -> Bool {
+    func handleKey(_ event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection([.command, .control, .option])
         guard mods.isEmpty, event.window === windowController.window,
               let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        if event.isARepeat && (key == "f" || key == "b") { return true }
         let wc = windowController!
         if wc.isDrawing {
             switch event.keyCode {
