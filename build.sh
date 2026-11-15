@@ -35,7 +35,14 @@ rm -rf "$APP" "$OBJROOT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 SDK=$(xcrun --show-sdk-path --sdk macosx)
-if (( RELEASE )); then ARCHS=(arm64 x86_64); else ARCHS=($(uname -m)); fi
+if (( RELEASE )); then
+  ARCHS=(arm64 x86_64)
+elif [[ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null)" == 1 ]]; then
+  # uname reports the shell's architecture when it runs under Rosetta.
+  ARCHS=(arm64)
+else
+  ARCHS=(x86_64)
+fi
 
 # Keep this machine's folder paths out of the binary.
 ROOT=$(pwd)
