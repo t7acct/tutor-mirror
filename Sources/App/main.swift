@@ -57,7 +57,10 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         }
         window.backgroundColor = .black
         window.collectionBehavior = [.fullScreenPrimary]
-        window.contentAspectRatio = NSSize(width: 4, height: 3)
+        // Any shape: the picture keeps its own shape inside, with black bars
+        // around it. A window locked to the iPad's shape couldn't fill the
+        // screen in full screen or when Rectangle maximised it.
+        window.contentMinSize = NSSize(width: 320, height: 180)
         window.setFrameAutosaveName("TutorMirrorWindow")
         pointer = PointerHider(window: window, enabled: Settings.hidePointer)
         super.init(window: window)
@@ -357,23 +360,41 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         showToast("Copied the picture")
     }
 
-    /// Lock the window to the stream's shape (e.g. 4:3 landscape, 3:4 portrait)
-    /// so there are no black bars.
+    /// The picture changed shape: Goodnotes presentation mode starting or
+    /// stopping, Split View or Slide Over, a rotation. The window stays exactly
+    /// where you, Rectangle or full screen put it, and the picture fits inside
+    /// with black bars. (It used to reshape the window, which undid a
+    /// maximised or full-screen window every time.)
     private func videoSizeChanged(_ size: CGSize) {
-        guard let window, size.width > 0, size.height > 0 else { return }
-        window.contentAspectRatio = size
-        let current = window.contentRect(forFrameRect: window.frame)
-        let aspect = size.width / size.height
-        // Keep the area roughly the same, change the shape.
-        let area = current.width * current.height
-        var newH = (area / aspect).squareRoot()
-        var newW = newH * aspect
-        if let screen = window.screen?.visibleFrame {
-            let fit = min(1, screen.width / newW, (screen.height - 40) / newH)
-            newW *= fit; newH *= fit
+        annotations.needsDisplay = true
+    }
+
+    var isFullScreen: Bool { window?.styleMask.contains(.fullScreen) ?? false }
+
+    /// Where the picture is on screen, without the black bars.
+    var pictureFrameOnScreen: NSRect? {
+        guard let window, videoView.croppedVideoSize.width > 0 else { return nil }
+        return window.convertToScreen(videoView.convert(videoView.contentRect, to: nil))
+    }
+
+    var canFitWindowToPicture: Bool {
+        guard !isFullScreen, let window, let picture = pictureFrameOnScreen else { return false }
+        return abs(picture.width - window.frame.width) > 1 || abs(picture.height - window.frame.height) > 1
+    }
+
+    /// Trims the black bars: the window shrinks to the picture, which stays the
+    /// same size in the same place.
+    func fitWindowToPicture() {
+        guard canFitWindowToPicture, let window, var rect = pictureFrameOnScreen?.integral else { return }
+        let minSize = window.contentMinSize
+        if rect.width < minSize.width || rect.height < minSize.height {
+            // Too small to trim further: grow around the picture's centre.
+            let s = max(minSize.width / rect.width, minSize.height / rect.height)
+            rect = NSRect(x: rect.midX - rect.width * s / 2, y: rect.midY - rect.height * s / 2,
+                          width: rect.width * s, height: rect.height * s).integral
         }
-        var rect = NSRect(x: current.midX - newW / 2, y: current.maxY - newH, width: newW, height: newH)
-        rect = window.frameRect(forContentRect: rect)
+        // The content view fills the whole frame (no title bar), so the
+        // picture's rectangle is the new frame.
         window.setFrame(rect, display: true, animate: false)
     }
 
@@ -394,6 +415,10 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) { repositionPanels() }
     func windowDidMiniaturize(_ notification: Notification) { hideBadges() }
     func windowDidDeminiaturize(_ notification: Notification) { updateBadge() }
+    // Fill the whole screen in full screen, whatever the picture's shape.
+    func window(_ window: NSWindow, willUseFullScreenContentSize proposedSize: NSSize) -> NSSize { proposedSize }
+    func windowDidEnterFullScreen(_ notification: Notification) { updateBadge(); repositionPanels() }
+    func windowDidExitFullScreen(_ notification: Notification) { updateBadge(); repositionPanels() }
 
     private func repositionPanels() {
         lagMeter.reposition()
@@ -591,10 +616,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
             .keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(item("Fit Window to Picture", #selector(fitWindowToPicture(_:))))
         main.addItem(withTitle: "View", action: nil, keyEquivalent: "").submenu = viewMenu
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
         windowMenu.addItem(item("Show Mirror Window", #selector(showMirrorWindow(_:))))
         main.addItem(withTitle: "Window", action: nil, keyEquivalent: "").submenu = windowMenu
         NSApp.windowsMenu = windowMenu
@@ -621,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// ⌘C when no text field has focus: copy the picture.
     @objc func copy(_ sender: Any?) { windowController.copySnapshot() }
     @objc func adjustCrop(_ sender: Any?) { windowController.showCropPanel() }
+    @objc func fitWindowToPicture(_ sender: Any?) { windowController.fitWindowToPicture() }
 
     @objc func setCropPreset(_ sender: NSMenuItem) {
         switch sender.tag {
@@ -763,6 +791,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return wc?.annotations.strokes.isEmpty == false
         case #selector(resetZoom(_:)):
             return wc?.isZoomed == true
+        case #selector(fitWindowToPicture(_:)):
+            item.toolTip = "Trims the black bars around the picture. The picture stays the same size."
+            return wc?.canFitWindowToPicture == true
         case #selector(setCropPreset(_:)):
             let c = Settings.crop
             let preset: CropInsets = item.tag == 1 ? .statusBar : item.tag == 2 ? .statusBarAndToolbar : .none

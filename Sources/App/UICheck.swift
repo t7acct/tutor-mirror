@@ -155,6 +155,74 @@ final class UICheck {
         wc.resetZoom()
     }
 
+    /// The window keeps whatever shape it's given (full screen, Rectangle)
+    /// and the picture fits inside it with black bars, even when the picture
+    /// changes shape mid-lesson (Goodnotes presentation mode, Split View).
+    private func checkWindowShape(_ wc: MirrorWindowController, source: SelfTest) async {
+        let mw = wc.window!, v = wc.videoView
+        check(mw.contentAspectRatio == .zero, "the window isn't locked to the iPad's shape")
+        check(mw.collectionBehavior.contains(.fullScreenPrimary), "the window can go full screen")
+        check(wc.window(mw, willUseFullScreenContentSize: NSSize(width: 2560, height: 1440)) == NSSize(width: 2560, height: 1440),
+              "full screen uses the whole screen")
+
+        // A monitor-shaped window, as Rectangle's Maximize or full screen leaves it.
+        let screen = mw.screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1600, height: 1000)
+        let wide = NSRect(x: screen.minX, y: screen.minY, width: min(screen.width, 1600), height: min(screen.height, 900)).integral
+        mw.setFrame(wide, display: true)
+        await wait(0.2)
+        check(mw.frame == wide, "the window takes a widescreen frame (\(mw.frame.size))")
+        func pictureFits(_ video: CGSize) -> Bool {
+            let c = v.contentRect, b = v.bounds
+            let fitsWidth = near(c.width, b.width, 0.002) && c.height <= b.height + 0.5
+            let fitsHeight = near(c.height, b.height, 0.002) && c.width <= b.width + 0.5
+            return (fitsWidth || fitsHeight) && near(c.width / c.height, video.width / video.height, 0.002)
+                && near(c.midX, b.midX, 0.002) && near(c.midY, b.midY, 0.002)
+        }
+        check(pictureFits(CGSize(width: 4, height: 3)), "the 4:3 picture sits centred with bars at the sides (\(v.contentRect))")
+
+        // Goodnotes presentation mode: the iPad switches to a 16:9 picture.
+        await source.setSize(width: 2732, height: 1536)
+        await source.sendFrame()
+        await wait(0.4)
+        check(v.croppedVideoSize == CGSize(width: 2732, height: 1536), "the picture changed to 2732×1536 (\(v.croppedVideoSize))")
+        check(mw.frame == wide, "the window stays put when the picture changes shape (\(mw.frame.size))")
+        check(pictureFits(CGSize(width: 2732, height: 1536)), "the 16:9 picture fits inside (\(v.contentRect))")
+
+        // Split View, back to the iPad's own shape: still no resize.
+        await source.setSize(width: 2048, height: 1536)
+        await source.sendFrame()
+        await wait(0.4)
+        check(v.croppedVideoSize == CGSize(width: 2048, height: 1536), "the picture changed back to 2048×1536")
+        check(mw.frame == wide, "the window stays put when the picture changes back (\(mw.frame.size))")
+
+        // Black bars in the image itself, top and bottom on a tall target.
+        let letterbox = v.renderOffscreen(size: CGSize(width: 400, height: 600))
+        save(letterbox, "render-letterbox")
+        let rows = letterbox.flatMap { image -> (top: [UInt8], middle: [UInt8])? in
+            guard let data = image.dataProvider?.data as Data? else { return nil }
+            // In the leftmost (white) colour bar, above the sweeping marker.
+            func px(_ y: Int) -> [UInt8] {
+                let i = y * image.bytesPerRow + 20 * 4
+                return Array(data[i..<(i + 3)])
+            }
+            return (px(10), px(image.height * 35 / 100))
+        }
+        check(rows.map { $0.top.allSatisfy { $0 < 8 } && $0.middle.allSatisfy { $0 > 200 } } ?? false,
+              "the picture is letterboxed in black, not stretched (top \(rows?.top ?? []), middle \(rows?.middle ?? []))")
+
+        // Fit Window to Picture trims the bars and leaves the picture where it was.
+        let before = wc.pictureFrameOnScreen ?? .zero
+        check(wc.canFitWindowToPicture, "Fit Window to Picture is offered while there are bars")
+        wc.fitWindowToPicture()
+        await wait(0.2)
+        let after = wc.pictureFrameOnScreen ?? .zero
+        check(near(mw.frame.width / mw.frame.height, 4.0 / 3, 0.005), "the fitted window is the picture's shape (\(mw.frame.size))")
+        check(abs(after.minX - before.minX) <= 1 && abs(after.minY - before.minY) <= 1
+              && abs(after.width - before.width) <= 1 && abs(after.height - before.height) <= 1,
+              "the picture stays the same size in the same place (\(before) → \(after))")
+        check(!wc.canFitWindowToPicture, "nothing left to trim")
+    }
+
     private func checkNotifications(_ wc: MirrorWindowController) async {
         wc.showToast("Nothing to save while blank", color: .systemOrange, for: 1)
         check(wc.badge.isVisible && wc.holdMode == .blank && wc.toastBadge.isVisible &&
@@ -212,7 +280,6 @@ final class UICheck {
         check([NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy { mw.standardWindowButton($0)?.isHidden ?? true },
               "mirror window shows no window buttons")
         check(v.convert(v.bounds, to: nil).size == mw.frame.size, "the picture fills the whole window (\(v.bounds.size) in \(mw.frame.size))")
-        check(near(mw.frame.width / mw.frame.height, 2048.0 / 1536), "the window keeps the iPad's shape (\(mw.frame.size))")
         check(!mw.title.isEmpty, "the window still has a name for Meet's window list (\(mw.title))")
 
         await checkHoldModes(wc, source: source)
@@ -246,6 +313,8 @@ final class UICheck {
         await wait(0.2)
         check(v.zoomScale == 1, "zoom reset")
         wc.setCrop(.none)
+
+        await checkWindowShape(wc, source: source)
 
         // Malformed codec data from the network (empty SPS and PPS) used to crash.
         VideoDecoder().configureWithAVCC(Data([1, 0x64, 0, 0x1F, 0xFF, 0xE1, 0, 0, 1, 0, 0]))

@@ -147,6 +147,12 @@ never the app's name. Drag the picture to move the window (while you're not
 drawing or zoomed in), drag an edge to resize it, and use ⌘W, ⌘M or ⌃⌘F to
 close it, minimise it or make it full screen.
 
+The window can be any shape. Full screen fills the whole display, and so does
+a window manager like Rectangle, with black bars around the picture where its
+shape doesn't match. The window stays put when the picture changes shape, for
+example when Goodnotes' presentation mode starts or you open Split View on the
+iPad. View → Fit Window to Picture trims the black bars off.
+
 Then click the TutorMirror window and use these keys:
 
 | Key | Your student sees | You see |
@@ -161,7 +167,7 @@ Then click the TutorMirror window and use these keys:
 | ⌘C | nothing | the picture is copied, ready to paste |
 | ⌘K | | the crop sliders |
 | ⌘L | nothing | the lag meter |
-| ⌃⌘F | the mirror, full screen | |
+| ⌃⌘F | the mirror, full screen (black bars fill the sides) | |
 
 The single-letter keys only work while the TutorMirror window is in front, so
 you can still type them in other apps. Freeze, Blank and Draw are also in the
@@ -239,8 +245,8 @@ log show --last 10m --predicate 'subsystem == "local.tutormirror" AND category =
 ## What works and what doesn't
 
 I've only tested it with my iPad Pro running Goodnotes. Other iPads and
-iPhones speak the same protocol, so they should be fine, and the window
-reshapes itself for portrait, landscape and phones. If something breaks on
+iPhones speak the same protocol, so they should be fine, and the picture
+fits the window in portrait, landscape and on phones. If something breaks on
 your device, open an issue.
 
 It handles one device at a time. While your iPad is mirroring, another

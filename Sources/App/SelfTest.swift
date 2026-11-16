@@ -14,11 +14,26 @@ final class SelfTest: @unchecked Sendable {
     private var frame = 0
     private var sentConfig = false
     private let queue = DispatchQueue(label: "local.tutormirror.selftest", qos: .userInteractive)
-    private let width = 2048, height = 1536
+    // Changed only on `queue` (or before start).
+    private var width = 2048, height = 1536
 
     init(decoder: VideoDecoder) { self.decoder = decoder }
 
     func start(continuous: Bool = true) {
+        makeEncoder()
+        guard continuous else { return }
+
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 0.5, repeating: 1.0 / 60.0, leeway: .milliseconds(1))
+        t.setEventHandler { [weak self] in self?.encodeNext() }
+        t.resume()
+        timer = t
+    }
+
+    private func makeEncoder() {
+        if let old = encoder { VTCompressionSessionInvalidate(old) }
+        encoder = nil
+        sentConfig = false
         let st = VTCompressionSessionCreate(
             allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil,
@@ -27,13 +42,19 @@ final class SelfTest: @unchecked Sendable {
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
-        guard continuous else { return }
+    }
 
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 0.5, repeating: 1.0 / 60.0, leeway: .milliseconds(1))
-        t.setEventHandler { [weak self] in self?.encodeNext() }
-        t.resume()
-        timer = t
+    /// Change the picture's shape mid-stream, as the iPad does when Goodnotes
+    /// presentation mode starts or Split View opens: new codec data, new size.
+    func setSize(width: Int, height: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                self.width = width
+                self.height = height
+                self.makeEncoder()
+                continuation.resume()
+            }
+        }
     }
 
     /// In the headless check, send one frame and wait for it to reach the renderer.

@@ -116,10 +116,10 @@ final class AnnotationView: NSView {
         guard drawing else {
             if event.clickCount == 2 {
                 onResetZoom?()
-            } else if !isZoomed() {
+            } else if !isZoomed(), let window, !window.styleMask.contains(.fullScreen) {
                 // The window has no title bar for the student to see, so drag
                 // the picture to move it (while zoomed, dragging pans instead).
-                window?.performDrag(with: event)
+                window.performDrag(with: event)
             }
             return
         }
