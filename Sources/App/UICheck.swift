@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Network
 import dnssd
 
@@ -339,6 +340,7 @@ final class UICheck {
         checkTakeoverRules()
         await checkTakeoverOverNetwork()
         checkPeerToPeer()
+        await checkPinPairing()
 
         // Mouse pointer: swapped for a stand-in only over the mirror window.
         let p = wc.pointer, win = wc.window!
@@ -475,6 +477,155 @@ final class UICheck {
               "lag meter shows the link \(current.isOn ? "with" : "only with") the experiment on")
     }
 
+    // MARK: On-screen code pairing
+
+    /// From an independent Python version of legacy AirPlay code pairing
+    /// (pyatv's conventions): fixed salt, receiver secret b, sender secrets a.
+    private enum PinVectors {
+        static let user = "5E:B1:22:7C:90:4D", code = "4821"
+        static let salt = data("9c52f22665a60c12d289185d950ee881")
+        static let b = data("1738f7d93d9c172411e20b8f6b0d549b6f03675a1600a35a099950d836f675cc")
+        static let a1 = data("39263059f28c105d1fb17c2390c192cfd3ac94af0f21ddb66cad4a268d116ece")
+        static let a2 = data("584cc92f07c597f798e2e95450d7941d27f9c55d14ece04cc98f9bf576a399f8")
+        static let m1 = "c9c2bfd0295343b16f7e4753ac736fdc0c42578b", m2 = data("f0c9aeea0d3053972a9340953e8b6e5404536053")
+        static let k1 = data("bfed79e40c5030d4f99c893d7a501efb105d30f8fb363892ed84047c74526741bc600d0d8108f6df")
+        static func data(_ hex: String) -> Data { Data(PinPairing.hexBytes(hex)) }
+        static func A(_ a: Data) -> Data {
+            PinPairing.field.power(PinPairing.g, BigUInt(bytes: a)).bytes(length: PinPairing.length)
+        }
+        static func start() -> [String: Any] {
+            PinPairing.codes.set(code)
+            PinPairing.codes.testValues = (salt, b)
+            return ["method": "pin", "user": user]
+        }
+    }
+
+    private func plist(_ dict: [String: Any]) -> Data {
+        (try? PropertyListSerialization.data(fromPropertyList: dict, format: .binary, options: 0)) ?? Data()
+    }
+
+    /// Steps 1 and 2 with the fixed values. Returns the session and the M2 it
+    /// sent back, or nil if it refused.
+    private func pinProof(a: Data, m1: String) -> (PinPairing.Session, Data?) {
+        let session = PinPairing.Session(identity: app.manager.identity)
+        guard case .reply(let first) = session.handle(plist(PinVectors.start())),
+              first["salt"] as? Data == PinVectors.salt, (first["pk"] as? Data)?.count == 256 else { return (session, nil) }
+        guard case .reply(let second) = session.handle(plist(["pk": PinVectors.A(a), "proof": PinVectors.data(m1)])) else {
+            return (session, nil)
+        }
+        return (session, second["proof"] as? Data)
+    }
+
+    /// Step 3 as the sender does it: its key sealed under IV+1, and a way to
+    /// open the receiver's reply (sealed under IV+2).
+    private func senderKeySwap(k: Data, senderKey: Data) -> (request: [String: Any], open: ([String: Any]) -> Data?)? {
+        let key = SymmetricKey(data: PinPairing.sha512("Pair-Setup-AES-Key", k).prefix(16))
+        var iv = [UInt8](PinPairing.sha512("Pair-Setup-AES-IV", k).prefix(16))
+        iv[15] &+= 1
+        guard let nonce = try? AES.GCM.Nonce(data: iv), let box = try? AES.GCM.seal(senderKey, using: key, nonce: nonce) else {
+            return nil
+        }
+        iv[15] &+= 1
+        let replyIV = iv
+        return (["epk": box.ciphertext, "authTag": box.tag], { reply in
+            guard let epk = reply["epk"] as? Data, let tag = reply["authTag"] as? Data,
+                  let nonce = try? AES.GCM.Nonce(data: replyIV),
+                  let sealed = try? AES.GCM.SealedBox(nonce: nonce, ciphertext: epk, tag: tag) else { return nil }
+            return try? AES.GCM.open(sealed, using: key)
+        })
+    }
+
+    private func checkPinPairing() async {
+        let ours = app.manager.identity.ed25519PublicKey.rawRepresentation
+        let (session, m2) = pinProof(a: PinVectors.a1, m1: PinVectors.m1)
+        check(m2 == PinVectors.m2, "code pairing: the proof matches the Python reference")
+        let senderKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        if let swap = senderKeySwap(k: PinVectors.k1, senderKey: senderKey),
+           case .paired(let reply, let theirs) = session.handle(plist(swap.request)) {
+            check(theirs == senderKey && swap.open(reply) == ours, "code pairing: Ed25519 keys swapped both ways")
+        } else {
+            check(false, "code pairing: Ed25519 keys swapped both ways")
+        }
+        check(PinPairing.codes.current == nil, "code pairing: the code is used up once paired")
+        check(pinProof(a: PinVectors.a2, m1: "9145e9d8b8164f82db9402ff2429f031e2c4ae23").1
+              == PinVectors.data("66719d9013e1ed50c164075819713583bceb244e"),
+              "code pairing: S with a leading zero byte, hashed without it")
+        check(pinProof(a: PinVectors.a2, m1: "2b938dc3454b4f08d8dc0671dd5da76974bab516").1
+              == PinVectors.data("61c55c8c24e7fdd890b533f643b122c6ff209291"),
+              "code pairing: S hashed padded, H(g) padded")
+        check(pinProof(a: PinVectors.a1, m1: "a1f2565c814b82d9acbc14bbd60c08b975e41a29").1 == nil
+              && PinPairing.codes.current == nil, "code pairing: a wrong code is refused and used up")
+        if case .refuse = PinPairing.Session(identity: app.manager.identity).handle(plist(["method": "pin", "user": "x"])) {
+            check(true, "code pairing: refused when no code is on screen")
+        } else {
+            check(false, "code pairing: refused when no code is on screen")
+        }
+
+        // The iPad trusts the receiver's key after pairing, so it's kept, but
+        // only with the experiment on.
+        let on = PeerToPeer.current.isOn
+        let again = ReceiverIdentity.make(slot: 0, name: "check")
+        check((again.ed25519PublicKey.rawRepresentation == ours && again.deviceID == app.manager.identity.deviceID) == on,
+              "receiver identity is kept across launches \(on ? "with" : "only with") the experiment on")
+        if on, let url = ReceiverIdentity.savedURL(slot: 0) {
+            let mode = (try? FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int) ?? nil
+            check(mode == 0o600, "the saved identity is readable only by you (\(String(mode ?? 0, radix: 8)))")
+        }
+
+        await checkPinPairingOverNetwork()
+    }
+
+    /// The whole exchange through a loopback-only server, as the iPad does it.
+    private func checkPinPairingOverNetwork() async {
+        let manager = app.manager
+        let server = AirPlayServer(manager: manager)
+        server.start(port: manager.identity.ports.airplay, loopbackOnly: true)
+        await wait(0.3)
+        await pinPairingSteps(manager)
+        server.stop()
+        await wait(0.3)
+        manager.state = .mirroring("Self-test")
+    }
+
+    private func pinPairingSteps(_ manager: AirPlayManager) async {
+        let ipad = TestClient(host: "127.0.0.1", port: manager.identity.ports.airplay)
+        guard await ipad.open() else { return check(false, "code pairing: connect to the test server") }
+        defer { ipad.close() }
+        check(await ipad.request("POST", "/pair-pin-start", cseq: 1) == 200, "code pairing: pair-pin-start is answered")
+        await wait(0.2)
+        let shown = app.windowController.toast?.text ?? ""
+        guard PeerToPeer.current.isOn else {
+            check(!shown.contains("Code for the iPad"), "code pairing is off without the experiment: no code shown")
+            check(await ipad.request("POST", "/pair-setup-pin", cseq: 2, plist: ["method": "pin", "user": "x"]) == 200
+                  && ipad.lastBody.isEmpty, "code pairing is off without the experiment: pair-setup-pin unhandled as before")
+            return
+        }
+        check(PinPairing.codes.current.map { shown == "Code for the iPad:  \($0)" } ?? false,
+              "code pairing: the code is on the tutor-only badge (\(shown))")
+        check(app.windowController.toastBadge.sharingType == .none, "code pairing: the badge is hidden from screen sharing")
+
+        check(await ipad.request("POST", "/pair-setup-pin", cseq: 2, plist: PinVectors.start()) == 200
+              && ipad.lastPlist?["salt"] as? Data == PinVectors.salt, "code pairing over the network: step 1")
+        check(await ipad.request("POST", "/pair-setup-pin", cseq: 3,
+                                 plist: ["pk": PinVectors.A(PinVectors.a1), "proof": PinVectors.data(PinVectors.m1)]) == 200
+              && ipad.lastPlist?["proof"] as? Data == PinVectors.m2, "code pairing over the network: step 2")
+        let senderKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        if let swap = senderKeySwap(k: PinVectors.k1, senderKey: senderKey) {
+            check(await ipad.request("POST", "/pair-setup-pin", cseq: 4, plist: swap.request) == 200
+                  && ipad.lastPlist.flatMap(swap.open) == manager.identity.ed25519PublicKey.rawRepresentation,
+                  "code pairing over the network: step 3")
+        }
+        await wait(0.2)
+        check(app.windowController.toast?.text == "iPad paired", "code pairing: the badge says the iPad is paired")
+
+        let restarted = await ipad.request("POST", "/pair-setup-pin", cseq: 5, plist: PinVectors.start())
+        let wrong = await ipad.request("POST", "/pair-setup-pin", cseq: 6,
+                                       plist: ["pk": PinVectors.A(PinVectors.a1), "proof": PinVectors.data("a1f2565c814b82d9acbc14bbd60c08b975e41a29")])
+        check(restarted == 200 && wrong == 470, "code pairing over the network: a wrong code gets 470")
+        await wait(0.2)
+        check(app.windowController.toast?.text.hasPrefix("Wrong code") == true, "code pairing: the badge says the code was wrong")
+    }
+
     // MARK: Takeover protection
 
     private func checkTakeoverRules() {
@@ -587,6 +738,12 @@ private final class TestClient: @unchecked Sendable {
 
     func close() { conn.cancel() }
 
+    /// The body of the last response, and that body as a property list.
+    private(set) var lastBody = Data()
+    var lastPlist: [String: Any]? {
+        try? PropertyListSerialization.propertyList(from: lastBody, format: nil) as? [String: Any]
+    }
+
     /// Sends one request and returns the response's status code, or nil if
     /// the connection closed or nothing came back in time.
     func request(_ method: String, _ path: String, cseq: Int, plist: [String: Any]? = nil) async -> Int? {
@@ -612,6 +769,7 @@ private final class TestClient: @unchecked Sendable {
                 guard let more = await receive(timeout: 5) else { return nil }
                 buf += more
             }
+            lastBody = Data(buf[end.upperBound..<(end.upperBound + length)])
             return header.split(separator: " ").dropFirst().first.flatMap { Int($0) }
         }
     }
