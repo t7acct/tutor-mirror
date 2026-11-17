@@ -121,11 +121,11 @@ final class MirrorStreamReceiver: @unchecked Sendable {
         connection = nwConnection
         logger.info("Mirror stream connection accepted (gen=\(gen))")
 
-        nwConnection.stateUpdateHandler = { [weak self] state in
+        nwConnection.stateUpdateHandler = { [weak self, weak nwConnection] state in
             guard let self = self else { return }
             switch state {
             case .ready:
-                LatencyStats.shared.link = PeerToPeer.logLink("Mirror stream", nwConnection)
+                if let nwConnection { LatencyStats.shared.link = PeerToPeer.logLink("Mirror stream", nwConnection) }
                 self.receiveData(generation: gen)
             case .failed(let error): self.logger.error("Mirror stream connection failed: \(error)")
             default: break
