@@ -247,6 +247,9 @@ class AirPlayManager: ObservableObject {
         if code == DNSServiceErrorType(kDNSServiceErr_PolicyDenied) {
             return localNetworkDeniedMessage
         }
+        if code == DNSServiceErrorType(kDNSServiceErr_BadInterfaceIndex), PeerToPeer.current.mode == .onlyAWDL {
+            return "The peer-to-peer test (peerToPeer = 2) needs AWDL, and this Mac has no AWDL link right now. Turn Wi-Fi on and click Retry, or set peerToPeer back to 0."
+        }
         return "Couldn't advertise this receiver on the network (Bonjour error \(code))."
     }
 

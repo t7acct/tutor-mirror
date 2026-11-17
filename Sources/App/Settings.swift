@@ -6,6 +6,7 @@ import Foundation
 ///     defaults write local.tutormirror maxFPS -int 120
 ///     defaults write local.tutormirror streamWidth -int 2732
 ///     defaults write local.tutormirror streamHeight -int 2048
+///     defaults write local.tutormirror peerToPeer -int 2     (experiment, see `peerToPeer`)
 ///
 /// Stream settings (size, fps) are sent to the iPad when it connects, so
 /// reconnect the iPad after changing them.
@@ -50,6 +51,14 @@ enum Settings {
     /// Base TCP/UDP port. Different from VirtualMirror's 47000 so both apps
     /// can run side by side for an A/B lag test.
     static var portBase: UInt16 { UInt16(clamping: int("portBase", isTestCopy ? 53000 : 52000)) }
+
+    /// Experiment: let the iPad send straight to this Mac over AWDL, the
+    /// peer-to-peer Wi-Fi link AirDrop uses, instead of through the router.
+    ///   0 = off: normal Wi-Fi only (the default)
+    ///   1 = advertise and listen on normal Wi-Fi and AWDL
+    ///   2 = AWDL only, so the iPad can't pick the router path
+    /// Read once at launch (see `PeerToPeer`): quit and reopen after changing it.
+    static var peerToPeer: Int { int("peerToPeer", 0) }
 
     /// iPad audio is off by default — tutoring with Goodnotes doesn't need it.
     static var playAudio: Bool {

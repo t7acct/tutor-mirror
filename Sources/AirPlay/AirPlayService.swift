@@ -40,14 +40,25 @@ final class AirPlayService {
 
         let port16 = UInt16(port)
 
+        // Peer-to-peer experiment: 0 and 0 (today's flags and interface) when off.
+        let p2p = PeerToPeer.current
+        guard let interfaceIndex = p2p.bonjourInterface else {
+            logger.error("peerToPeer=2 (AWDL only) but this Mac has no awdl0 interface; not advertising")
+            onFailure?(DNSServiceErrorType(kDNSServiceErr_BadInterfaceIndex))
+            return
+        }
+        if p2p.isOn {
+            logger.notice("Peer-to-peer experiment: peerToPeer=\(p2p.mode.rawValue, privacy: .public) flags=0x\(String(p2p.bonjourFlags, radix: 16), privacy: .public) interface=\(interfaceIndex, privacy: .public)")
+        }
+
         // Advertise _airplay._tcp
         let airplayTXT = AirPlayConfig.airplayTXTRecord(identity)
         var airplayServiceRef: DNSServiceRef?
         let airplayContext = Unmanaged.passRetained(RegistrationContext(onFailure: onFailure))
         let airplayErr = DNSServiceRegister(
             &airplayServiceRef,
-            0,                          // flags
-            0,                          // interfaceIndex (all)
+            p2p.bonjourFlags,           // flags (0 unless peer-to-peer)
+            interfaceIndex,             // interfaceIndex (0 = all, unless AWDL only)
             identity.name,              // name
             "_airplay._tcp",            // regtype
             nil,                        // domain (default)
@@ -75,8 +86,8 @@ final class AirPlayService {
         let raopContext = Unmanaged.passRetained(RegistrationContext(onFailure: onFailure))
         let raopErr = DNSServiceRegister(
             &raopServiceRef,
-            0,
-            0,
+            p2p.bonjourFlags,
+            interfaceIndex,
             raopName,
             "_raop._tcp",
             nil,
