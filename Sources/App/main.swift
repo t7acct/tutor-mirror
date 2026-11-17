@@ -623,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(.separator())
         viewMenu.addItem(item("Rename Receiver…", #selector(renameReceiver(_:))))
         viewMenu.addItem(item("Let Other Devices Take Over", #selector(toggleAllowTakeover(_:))))
+        viewMenu.addItem(item("Connect Directly to iPad (Beta)", #selector(toggleDirectLink(_:))))
         viewMenu.addItem(item("Restart Receiver", #selector(restartReceiver(_:)), "r"))
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
@@ -750,6 +751,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func toggleAllowTakeover(_ sender: Any?) { Settings.allowTakeover.toggle() }
 
+    /// The peer-to-peer (AWDL) link. Takes effect on reopening, because the
+    /// listeners, Bonjour and the receiver's key are set up at launch.
+    @objc func toggleDirectLink(_ sender: Any?) {
+        let on = PeerToPeer.current.isOn
+        let alert = NSAlert()
+        alert.window.sharingType = .none
+        if on {
+            alert.messageText = "Stop connecting directly?"
+            alert.informativeText = "\(Settings.appName) reopens and goes back to receiving through the router. Mirroring stops for a moment."
+        } else {
+            alert.messageText = "Connect directly to the iPad?"
+            alert.informativeText = """
+                The iPad sends the picture straight to this Mac over the peer-to-peer Wi-Fi link AirDrop uses, \
+                instead of through the router. In tests it cut the Wi-Fi delay per frame from about 22 ms to 2 ms.
+
+                The first time, the iPad asks for a 4-digit code, shown on this Mac (students don't see it). \
+                \(Settings.appName) reopens to switch, so mirroring stops for a moment.
+                """
+        }
+        alert.addButton(withTitle: "Reopen Now")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let previous = Settings.peerToPeer
+        Settings.peerToPeer = on ? 0 : 1
+        if !Updater.reopen() {
+            Settings.peerToPeer = previous
+            windowController?.showToast("Couldn't reopen. Quit and open \(Settings.appName) again to switch", color: .systemOrange, for: 6)
+        }
+    }
+
     @objc func toggleHidePointer(_ sender: Any?) {
         Settings.hidePointer.toggle()
         windowController.pointer.enabled = Settings.hidePointer
@@ -786,6 +817,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.state = Settings.hidePointer ? .on : .off
             item.toolTip = "Over the mirror window, students don't see your mouse pointer. You see a stand-in that screen sharing leaves out."
         case #selector(toggleAutoUpdates(_:)): item.state = Settings.autoCheckUpdates ? .on : .off
+        case #selector(toggleDirectLink(_:)):
+            item.state = PeerToPeer.current.isOn ? .on : .off
+            item.toolTip = "Beta: the iPad sends straight to this Mac over AWDL, the link AirDrop uses, instead of through the router."
         case #selector(toggleAllowTakeover(_:)):
             item.state = Settings.allowTakeover ? .on : .off
             item.toolTip = "When off, only the iPad that's mirroring can reconnect until it stops."

@@ -52,13 +52,17 @@ enum Settings {
     /// can run side by side for an A/B lag test.
     static var portBase: UInt16 { UInt16(clamping: int("portBase", isTestCopy ? 53000 : 52000)) }
 
-    /// Experiment: let the iPad send straight to this Mac over AWDL, the
+    /// Beta: let the iPad send straight to this Mac over AWDL, the
     /// peer-to-peer Wi-Fi link AirDrop uses, instead of through the router.
     ///   0 = off: normal Wi-Fi only (the default)
-    ///   1 = advertise and listen on normal Wi-Fi and AWDL
-    ///   2 = AWDL only, so the iPad can't pick the router path
-    /// Read once at launch (see `PeerToPeer`): quit and reopen after changing it.
-    static var peerToPeer: Int { int("peerToPeer", 0) }
+    ///   1 = advertise and listen on normal Wi-Fi and AWDL (View › Connect
+    ///       Directly to iPad)
+    ///   2 = AWDL only, so the iPad can't pick the router path (defaults only)
+    /// Read once at launch (see `PeerToPeer`): reopen after changing it.
+    static var peerToPeer: Int {
+        get { int("peerToPeer", 0) }
+        set { d.set(newValue, forKey: "peerToPeer") }
+    }
 
     /// iPad audio is off by default — tutoring with Goodnotes doesn't need it.
     static var playAudio: Bool {

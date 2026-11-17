@@ -466,6 +466,13 @@ final class UICheck {
               "peer-to-peer 2: advertises on awdl0 (index \(awdl)) only")
         check(includesAWDL(only) == (true, true) && recvAnyIf(only) == 1, "peer-to-peer 2: every socket can use AWDL")
 
+        // The menu option shows what's running (it takes effect on reopening).
+        let menuItem = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)
+            .first { $0.action == #selector(AppDelegate.toggleDirectLink(_:)) }
+        if let menuItem { _ = app.validateMenuItem(menuItem) }
+        check(menuItem?.state == (current.isOn ? .on : .off),
+              "View › \(menuItem?.title ?? "Connect Directly to iPad (missing)") is \(current.isOn ? "on" : "off")")
+
         // Tutor-only lag meter: a link line only while the experiment is on.
         // Set and cleared in one go on the main thread, so the 2 s lag log
         // never sees the made-up link.

@@ -260,15 +260,24 @@ final class Updater {
     }
 
     private func relaunch(_ app: URL) {
-        // A tiny helper waits for this copy to quit, then opens the new one.
+        if !Self.reopen(app) {
+            info("Update installed", "Quit and reopen \(Settings.appName) to start the new version.")
+        }
+    }
+
+    /// Quits and opens `app` again (this copy by default). A tiny helper
+    /// waits for this process to exit first. False if the helper didn't start.
+    @discardableResult
+    static func reopen(_ app: URL = Bundle.main.bundleURL) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$0\"", app.path]
         do {
             try p.run()
             NSApp.terminate(nil)
+            return true
         } catch {
-            info("Update installed", "Quit and reopen \(Settings.appName) to start the new version.")
+            return false
         }
     }
 

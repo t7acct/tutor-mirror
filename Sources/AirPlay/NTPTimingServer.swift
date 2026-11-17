@@ -21,6 +21,9 @@ final class NTPTimingServer: @unchecked Sendable {
     private let stateQueue = DispatchQueue(label: "local.tutormirror.ntptiming", qos: .userInteractive)
     private var sequenceNumber: UInt16 = 0
     let port: UInt16
+    /// Where timing traffic shows up, for the peer-to-peer experiment (over
+    /// AWDL no replies came back). Logged after 10 requests and at stop.
+    private var counts = (sent: 0, repliesOnPort: 0, repliesOnSocket: 0, answered: 0)
 
     init(port: UInt16) {
         self.port = port
@@ -101,8 +104,15 @@ final class NTPTimingServer: @unchecked Sendable {
         connection.start(queue: stateQueue)
     }
 
+    private func logCounts(_ when: String) {
+        guard PeerToPeer.current.isOn, counts.sent > 0 else { return }
+        logger.notice("Timing \(when, privacy: .public): sent \(self.counts.sent, privacy: .public) requests; replies \(self.counts.repliesOnPort, privacy: .public) on the timing port, \(self.counts.repliesOnSocket, privacy: .public) on the request socket; answered \(self.counts.answered, privacy: .public) iPad requests")
+    }
+
     func stop() {
         stateQueue.sync {
+            logCounts("at stop")
+            counts = (0, 0, 0, 0)
             activeSyncTimer?.cancel()
             activeSyncTimer = nil
             activeConnection?.cancel()
@@ -155,6 +165,8 @@ final class NTPTimingServer: @unchecked Sendable {
             request[24..<32] = Data(ptr)
         }
 
+        counts.sent += 1
+        if counts.sent == 10 { logCounts("after 10 requests") }
         connection.send(content: request, completion: .contentProcessed { [weak self] error in
             if let error = error {
                 self?.logger.error("NTP request send error: \(error)")
@@ -165,6 +177,7 @@ final class NTPTimingServer: @unchecked Sendable {
         // Receive the response
         connection.receiveMessage { [weak self] data, _, _, error in
             if let data = data, data.count >= 32, let self = self {
+                self.counts.repliesOnSocket += 1
                 self.recordReply(data, t4: self.currentNTPTimestamp())
             }
             if let error = error {
@@ -197,6 +210,7 @@ final class NTPTimingServer: @unchecked Sendable {
         conn.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
+                if PeerToPeer.current.isOn { PeerToPeer.logLink("Timing (from iPad)", conn) }
                 self?.receiveTimingRequest(on: conn)
             case .failed, .cancelled:
                 self?.passiveConnections.removeValue(forKey: id)
@@ -216,8 +230,10 @@ final class NTPTimingServer: @unchecked Sendable {
                 if data[data.startIndex + 1] == 0xd3 {
                     // A reply to one of OUR timing requests. The iPad sends these
                     // to our advertised timing port, not the request's source port.
+                    self.counts.repliesOnPort += 1
                     self.recordReply(data, t4: receiveTime)
                 } else {
+                    self.counts.answered += 1
                     let response = self.buildTimingResponse(request: data, receiveTime: receiveTime)
                     conn.send(content: response, completion: .contentProcessed { _ in })
                 }

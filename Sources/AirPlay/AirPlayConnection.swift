@@ -431,6 +431,12 @@ final class AirPlayConnection: @unchecked Sendable {
 
         let keys = plist.keys.sorted().joined(separator: ", ")
         logger.debug("SETUP keys: \(keys)")
+        if PeerToPeer.current.isOn {
+            // Which timing the sender asks for (over AWDL no timing replies come back).
+            let streams = (plist["streams"] as? [[String: Any]])?.map { "\($0["type"] ?? "?"): \($0.keys.sorted().joined(separator: ","))" } ?? []
+            let timing = ["timingProtocol", "timingPort", "isScreenMirroringSession"].compactMap { k in plist[k].map { "\(k)=\($0)" } }
+            logger.notice("SETUP keys: \(keys, privacy: .public) \(timing.joined(separator: " "), privacy: .public) streams: \(streams.joined(separator: "; "), privacy: .public)")
+        }
 
         // UxPlay processes ekey/eiv AND streams sequentially in the same handler,
         // building a single response dict. We match this behavior: both phases
