@@ -38,7 +38,11 @@ final class AirPlayServer: @unchecked Sendable {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
-            if loopbackOnly { params.requiredInterfaceType = .loopback }
+            if loopbackOnly {
+                params.requiredInterfaceType = .loopback
+            } else {
+                PeerToPeer.current.apply(to: params)
+            }
             guard let nwPort = NWEndpoint.Port(rawValue: port) else {
                 logger.error("Invalid port: \(port)")
                 onFailure?(.posix(.EINVAL))

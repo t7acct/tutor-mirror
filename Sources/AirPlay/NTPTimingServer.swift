@@ -34,6 +34,7 @@ final class NTPTimingServer: @unchecked Sendable {
         do {
             let params = NWParameters.udp
             params.allowLocalEndpointReuse = true
+            PeerToPeer.current.apply(to: params)
             guard let nwPort = NWEndpoint.Port(rawValue: port) else {
                 logger.error("Invalid NTP port: \(self.port)")
                 return
@@ -71,10 +72,15 @@ final class NTPTimingServer: @unchecked Sendable {
             return
         }
 
+        // Over AWDL the iPad is a scoped link-local address (fe80::…%awdl0,
+        // taken from the control connection's path), which an outbound flow
+        // can only reach with peer-to-peer allowed.
+        let params = NWParameters.udp
+        PeerToPeer.current.apply(to: params)
         let connection = NWConnection(
             host: remoteHost,
             port: nwPort,
-            using: .udp
+            using: params
         )
         self.activeConnection = connection
 

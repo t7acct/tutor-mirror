@@ -83,6 +83,7 @@ final class MirrorStreamReceiver: @unchecked Sendable {
                 let params = NWParameters(tls: nil, tcp: tcp)
                 params.allowLocalEndpointReuse = true
                 params.serviceClass = .interactiveVideo
+                PeerToPeer.current.apply(to: params)
                 guard let nwPort = NWEndpoint.Port(rawValue: port) else { return }
                 listener = try NWListener(using: params, on: nwPort)
             } catch {

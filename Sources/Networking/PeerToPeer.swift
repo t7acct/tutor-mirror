@@ -43,4 +43,27 @@ struct PeerToPeer: Equatable, Sendable {
         let index = if_nametoindex("awdl0")
         return index == 0 ? nil : index
     }
+
+    // MARK: Sockets
+
+    /// Lets a Network.framework listener or connection use AWDL. Leaves the
+    /// parameters exactly as they were when the experiment is off.
+    func apply(to params: NWParameters) {
+        guard isOn else { return }
+        params.includePeerToPeer = true
+    }
+
+    /// SO_RECV_ANYIF ("unrestricted inbound processing") from XNU's private
+    /// sys/socket.h, not in the SDK. Without it a BSD socket never sees
+    /// packets that arrive on AWDL. The kernel accepts it and reads it back
+    /// as set, where an unknown option fails with ENOPROTOOPT.
+    static let soRecvAnyIf: Int32 = 0x1104
+
+    /// For a raw BSD socket. Returns 0, or errno if the kernel refused.
+    /// Does nothing when the experiment is off.
+    func apply(toSocket fd: Int32) -> Int32 {
+        guard isOn else { return 0 }
+        var on: Int32 = 1
+        return setsockopt(fd, SOL_SOCKET, Self.soRecvAnyIf, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 ? 0 : errno
+    }
 }

@@ -254,6 +254,12 @@ final class AudioStreamReceiver: @unchecked Sendable {
         var rcvBuf: Int32 = 256 * 1024
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvBuf, socklen_t(MemoryLayout<Int32>.size))
 
+        // Peer-to-peer experiment: receive packets that arrive on AWDL too.
+        let anyIfError = PeerToPeer.current.apply(toSocket: sock)
+        if anyIfError != 0 {
+            logger.error("SO_RECV_ANYIF refused on port \(port): errno=\(anyIfError) (\(String(cString: strerror(anyIfError)), privacy: .public))")
+        }
+
         // Bind to the port on all interfaces
         var addr = sockaddr_in6()
         addr.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
