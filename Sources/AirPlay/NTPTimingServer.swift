@@ -5,7 +5,7 @@ import os
 /// AirPlay NTP-like timing server.
 /// Handles both:
 /// 1. Responding to timing requests from the iPhone (passive)
-/// 2. Actively sending timing requests to the iPhone every 3 seconds (active)
+/// 2. Actively sending timing requests to the iPhone once a second (active)
 ///
 /// @unchecked Sendable: all mutable state is confined to `stateQueue`.
 final class NTPTimingServer: @unchecked Sendable {
@@ -24,9 +24,17 @@ final class NTPTimingServer: @unchecked Sendable {
     /// Where timing traffic shows up, for the peer-to-peer experiment (over
     /// AWDL no replies came back). Logged after 10 requests and at stop.
     private var counts = (sent: 0, repliesOnPort: 0, repliesOnSocket: 0, answered: 0)
+    /// Time between our timing requests. Shorter only in the self-check.
+    private let requestInterval: TimeInterval
 
-    init(port: UInt16) {
+    init(port: UInt16, requestInterval: TimeInterval = 1) {
         self.port = port
+        self.requestInterval = requestInterval
+    }
+
+    /// Requests sent and replies read on the request socket (self-check).
+    var requestCounts: (sent: Int, repliesOnSocket: Int) {
+        stateQueue.sync { (counts.sent, counts.repliesOnSocket) }
     }
 
     func start() {
@@ -92,7 +100,9 @@ final class NTPTimingServer: @unchecked Sendable {
             switch state {
             case .ready:
                 self.logger.info("NTP active sync connection ready")
-                if let connection { PeerToPeer.logLink("Timing (to iPad)", connection) }
+                guard let connection, self.activeSyncTimer == nil else { break }
+                PeerToPeer.logLink("Timing (to iPad)", connection)
+                self.receiveTimingReply(on: connection)
                 self.startTimingRequestLoop()
             case .failed(let error):
                 self.logger.error("NTP active sync failed: \(error)")
@@ -132,9 +142,9 @@ final class NTPTimingServer: @unchecked Sendable {
         // Send first request immediately
         sendTimingRequest()
 
-        // Then every 3 seconds
+        // Then once a second
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
-        timer.schedule(deadline: .now() + 1, repeating: 1.0)
+        timer.schedule(deadline: .now() + requestInterval, repeating: requestInterval)
         timer.setEventHandler { [weak self] in
             self?.sendTimingRequest()
         }
@@ -173,15 +183,33 @@ final class NTPTimingServer: @unchecked Sendable {
                 return
             }
         })
+    }
 
-        // Receive the response
-        connection.receiveMessage { [weak self] data, _, _, error in
-            if let data = data, data.count >= 32, let self = self {
+    /// Reads replies that come back on the request socket, one read at a
+    /// time: the next is queued only when this one finishes. This used to
+    /// queue a read with every request, once a second, and the iPad often
+    /// doesn't answer on this socket (over the direct link it never does), so
+    /// the waiting reads piled up. After about an hour, roughly 3,700 of them
+    /// overflowed Network's stack and crashed the app.
+    private func receiveTimingReply(on connection: NWConnection) {
+        connection.receiveMessage { [weak self, weak connection] data, _, _, error in
+            guard let self, let connection, connection === self.activeConnection else { return }
+            if let data = data, data.count >= 32 {
                 self.counts.repliesOnSocket += 1
                 self.recordReply(data, t4: self.currentNTPTimestamp())
             }
+            // A UDP error (say, an ICMP "port unreachable") leaves the flow
+            // usable, so keep reading while it's ready, but not in a tight
+            // loop if the error keeps coming back.
+            guard case .ready = connection.state else { return }
             if let error = error {
-                self?.logger.debug("NTP response error: \(error)")
+                self.logger.debug("NTP response error: \(error)")
+                self.stateQueue.asyncAfter(deadline: .now() + 1) { [weak self, weak connection] in
+                    guard let self, let connection, connection === self.activeConnection else { return }
+                    self.receiveTimingReply(on: connection)
+                }
+            } else {
+                self.receiveTimingReply(on: connection)
             }
         }
     }

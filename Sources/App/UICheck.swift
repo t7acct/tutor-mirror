@@ -346,6 +346,7 @@ final class UICheck {
         checkPeerToPeer()
         checkHEVC()
         await checkPinPairing()
+        await checkTimingReads()
 
         // Mouse pointer: swapped for a stand-in only over the mirror window.
         let p = wc.pointer, win = wc.window!
@@ -697,6 +698,70 @@ final class UICheck {
         }
 
         await checkPinPairingOverNetwork()
+    }
+
+    /// The clock-sync requests to the iPad go out once a second. Up to 0.4.2
+    /// each one also queued a read on the socket, and when the iPad didn't
+    /// answer there (over the direct link it never does), about 4,000 waiting
+    /// reads overflowed Network's stack and the app crashed after an hour.
+    /// Send 4,500 quickly to an "iPad" that never answers, then some to one
+    /// that does.
+    private func checkTimingReads() async {
+        func testIPad(answers: Bool) async -> (listener: NWListener, port: UInt16)? {
+            guard let listener = try? NWListener(using: .udp, on: .any) else { return nil }
+            let queue = DispatchQueue(label: "check.timing-ipad")
+            listener.newConnectionHandler = { conn in
+                conn.start(queue: queue)
+                func read() {
+                    conn.receiveMessage { data, _, _, error in
+                        if answers, let data, data.count >= 32 {
+                            // Echo our send time as all three iPad times: a sane sample.
+                            let t1 = data.subdata(in: data.startIndex + 24 ..< data.startIndex + 32)
+                            var reply = Data([0x80, 0xd3]) + Data(count: 6)
+                            reply += t1 + t1 + t1
+                            conn.send(content: reply, completion: .contentProcessed { _ in })
+                        }
+                        if error == nil { read() }
+                    }
+                }
+                read()
+            }
+            listener.start(queue: queue)
+            for _ in 0..<40 {
+                if let port = listener.port?.rawValue, port != 0 { return (listener, port) }
+                await wait(0.05)
+            }
+            listener.cancel()
+            return nil
+        }
+
+        guard let silent = await testIPad(answers: false) else { return check(false, "timing: start a test iPad") }
+        let toSilent = NTPTimingServer(port: 0, requestInterval: 0.001)
+        toSilent.startActiveSync(remoteHost: "127.0.0.1", remotePort: silent.port)
+        var sent = 0
+        for _ in 0..<300 {
+            await wait(0.05)
+            sent = toSilent.requestCounts.sent
+            if sent >= 4500 { break }
+        }
+        await wait(0.2)
+        toSilent.stop()
+        silent.listener.cancel()
+        check(sent >= 4500, "timing: \(sent) requests to an iPad that never answers, without crashing")
+
+        guard let answering = await testIPad(answers: true) else { return check(false, "timing: start a test iPad that answers") }
+        let toAnswering = NTPTimingServer(port: 0, requestInterval: 0.01)
+        toAnswering.startActiveSync(remoteHost: "127.0.0.1", remotePort: answering.port)
+        for _ in 0..<100 {
+            await wait(0.05)
+            if toAnswering.requestCounts.sent >= 100 { break }
+        }
+        await wait(0.2)
+        let counts = toAnswering.requestCounts
+        toAnswering.stop()
+        answering.listener.cancel()
+        check(counts.sent >= 100 && counts.repliesOnSocket >= counts.sent - 3,
+              "timing: replies on the request socket keep being read (\(counts.repliesOnSocket) of \(counts.sent))")
     }
 
     /// The whole exchange through a loopback-only server, as the iPad does it.
