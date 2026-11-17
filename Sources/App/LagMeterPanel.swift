@@ -51,6 +51,9 @@ final class LagMeterPanel: NSPanel {
         timer = nil
     }
 
+    /// What the meter says right now (for the headless check).
+    var text: String { label.stringValue }
+
     private func ms(_ v: Double) -> String { String(format: "%3.0f", v * 1000) }
 
     private func refresh() {

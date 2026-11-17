@@ -1,5 +1,6 @@
 import AppKit
 import Network
+import dnssd
 
 /// Headless check of the newer features, for developing while the real app
 /// is busy mirroring a lesson. Nothing is shown and focus is never taken.
@@ -337,6 +338,7 @@ final class UICheck {
 
         checkTakeoverRules()
         await checkTakeoverOverNetwork()
+        checkPeerToPeer()
 
         // Mouse pointer: swapped for a stand-in only over the mirror window.
         let p = wc.pointer, win = wc.window!
@@ -415,6 +417,62 @@ final class UICheck {
         } catch {
             check(false, "updater: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Peer-to-peer experiment
+
+    /// The AWDL switches. 0 must set nothing at all; 1 and 2 must match what
+    /// `dns-sd` showed reaching awdl0 (see `PeerToPeer`).
+    private func checkPeerToPeer() {
+        let current = PeerToPeer.current
+        check(current == PeerToPeer(setting: Settings.peerToPeer), "running with peerToPeer=\(current.mode.rawValue)")
+        check(PeerToPeer(setting: 9).mode == .off && PeerToPeer(setting: -1).mode == .off,
+              "peer-to-peer: unknown values count as off")
+
+        /// SO_RECV_ANYIF as read back from a fresh UDP socket after `apply`.
+        func recvAnyIf(_ p: PeerToPeer) -> Int32? {
+            let fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)
+            guard fd >= 0 else { return nil }
+            defer { close(fd) }
+            guard p.apply(toSocket: fd) == 0 else { return nil }
+            var value: Int32 = -1
+            var len = socklen_t(MemoryLayout<Int32>.size)
+            return getsockopt(fd, SOL_SOCKET, PeerToPeer.soRecvAnyIf, &value, &len) == 0 ? value : nil
+        }
+        func includesAWDL(_ p: PeerToPeer) -> (udp: Bool, tcp: Bool) {
+            let udp = NWParameters.udp, tcp = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
+            p.apply(to: udp); p.apply(to: tcp)
+            return (udp.includePeerToPeer, tcp.includePeerToPeer)
+        }
+
+        let off = PeerToPeer(setting: 0)
+        check(off.bonjourFlags == 0 && off.bonjourInterface == 0, "peer-to-peer 0: Bonjour flags 0 and interface 0, as before")
+        check(includesAWDL(off) == (false, false), "peer-to-peer 0: listeners and the timing flow leave AWDL out")
+        check(recvAnyIf(off) == 0, "peer-to-peer 0: audio sockets don't get SO_RECV_ANYIF")
+
+        let both = PeerToPeer(setting: 1)
+        check(both.bonjourFlags == DNSServiceFlags(kDNSServiceFlagsIncludeP2P | kDNSServiceFlagsIncludeAWDL) && both.bonjourInterface == 0,
+              "peer-to-peer 1: advertises on every interface plus AWDL")
+        check(includesAWDL(both) == (true, true), "peer-to-peer 1: listeners and the timing flow include AWDL")
+        check(recvAnyIf(both) == 1, "peer-to-peer 1: the kernel accepts SO_RECV_ANYIF on audio sockets")
+
+        let only = PeerToPeer(setting: 2)
+        let awdl = if_nametoindex("awdl0")
+        check(only.bonjourFlags == 0 && only.bonjourInterface == (awdl == 0 ? nil : awdl),
+              "peer-to-peer 2: advertises on awdl0 (index \(awdl)) only")
+        check(includesAWDL(only) == (true, true) && recvAnyIf(only) == 1, "peer-to-peer 2: every socket can use AWDL")
+
+        // Tutor-only lag meter: a link line only while the experiment is on.
+        // Set and cleared in one go on the main thread, so the 2 s lag log
+        // never sees the made-up link.
+        let meter = LagMeterPanel()
+        LatencyStats.shared.link = "awdl0"
+        meter.start()
+        meter.stop()
+        LatencyStats.shared.link = nil
+        render(meter, "lag-meter")
+        check(meter.text.contains("awdl0 · direct (AWDL)") == current.isOn,
+              "lag meter shows the link \(current.isOn ? "with" : "only with") the experiment on")
     }
 
     // MARK: Takeover protection
