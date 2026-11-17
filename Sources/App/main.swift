@@ -450,6 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var keyMonitor: Any?
     private var statusItem: NSStatusItem?
     private(set) var welcome: WelcomeWindow?
+    private(set) var directLinkIntro: DirectLinkIntroWindow?
 
     /// Mirroring, or an iPad is connecting: never interrupt with update prompts.
     private var isMirroring: Bool {
@@ -464,7 +465,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowController = MirrorWindowController(manager: manager)
         windowController.showWindow(nil)
         windowController.onModeChange = { [weak self] in self?.updateStatusItem() }
-        windowController.onIdle = { Updater.shared.offerPendingIfAppropriate() }
+        windowController.onIdle = { [weak self] in
+            Updater.shared.offerPendingIfAppropriate()
+            self?.offerDirectLinkIntroIfAppropriate()
+        }
 
         // Single-key shortcuts while the TutorMirror window is in front (only
         // in this app, so you can still type these letters everywhere else).
@@ -511,11 +515,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             showWelcome(nil)
         } else if selfTestMode == nil {
             Updater.shared.start()
+            offerDirectLinkIntroIfAppropriate()
         }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         Updater.shared.offerPendingIfAppropriate()
+        offerDirectLinkIntroIfAppropriate()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -640,6 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         let helpMenu = NSMenu(title: "Help")
         helpMenu.addItem(item("Welcome to \(name)", #selector(showWelcome(_:))))
+        helpMenu.addItem(item("What's New: Direct Link to iPad", #selector(showDirectLinkIntro(_:))))
         helpMenu.addItem(item("\(name) on GitHub", #selector(openGitHub(_:))))
         helpMenu.addItem(item("Report a Problem…", #selector(reportProblem(_:))))
         main.addItem(withTitle: "Help", action: nil, keyEquivalent: "").submenu = helpMenu
@@ -692,6 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             w.onClose = { [weak self] autoUpdates in
                 let firstRun = !Settings.hasSeenWelcome
                 Settings.hasSeenWelcome = true
+                if firstRun { Settings.seenDirectLinkIntro = true }   // the welcome has a row on it
                 let selfTest = ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] != nil
                 // Start checking after the first welcome, or when the box was
                 // just ticked; stop if it was just unticked.
@@ -703,6 +711,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             welcome = w
         }
         welcome?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
+
+    /// The direct-link intro, once, for people who updated. Waits until no
+    /// iPad is mirroring and the app is in front (like the update prompt).
+    func offerDirectLinkIntroIfAppropriate() {
+        guard ProcessInfo.processInfo.environment["TUTORMIRROR_SELFTEST"] == nil, NSApp.isActive, directLinkIntro == nil,
+              DirectLinkIntroWindow.shouldOffer(hasSeenWelcome: Settings.hasSeenWelcome, seenIntro: Settings.seenDirectLinkIntro,
+                                                linkOn: PeerToPeer.current.isOn, busy: isMirroring) else { return }
+        showDirectLinkIntro(nil)
+    }
+
+    /// Help → What's New, or the one-time offer.
+    @objc func showDirectLinkIntro(_ sender: Any?) {
+        if directLinkIntro == nil {
+            let w = DirectLinkIntroWindow(linkOn: PeerToPeer.current.isOn)
+            w.onTurnOn = { [weak self] in self?.switchDirectLink(on: true) }
+            w.onClose = { [weak self] in
+                Settings.seenDirectLinkIntro = true
+                self?.directLinkIntro = nil
+            }
+            directLinkIntro = w
+        }
+        directLinkIntro?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
 
@@ -773,8 +805,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         alert.addButton(withTitle: "Reopen Now")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        switchDirectLink(on: !on)
+    }
+
+    /// Saves the setting and reopens. 1 = router + AWDL, the menu's mode.
+    func switchDirectLink(on: Bool) {
         let previous = Settings.peerToPeer
-        Settings.peerToPeer = on ? 0 : 1
+        Settings.peerToPeer = on ? 1 : 0
         if !Updater.reopen() {
             Settings.peerToPeer = previous
             windowController?.showToast("Couldn't reopen. Quit and open \(Settings.appName) again to switch", color: .systemOrange, for: 6)

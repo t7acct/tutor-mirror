@@ -263,6 +263,7 @@ final class UICheck {
         // onto the window background shows up in the PNGs.
         NSApp.appearance = NSAppearance(named: .aqua)
         render(WelcomeWindow(), "welcome")
+        checkDirectLinkIntro()
         render(CropPanel(insets: .statusBar), "crop-panel")
         let wc = app.windowController!
         render(wc.drawToolbar, "draw-toolbar")
@@ -484,6 +485,32 @@ final class UICheck {
         render(meter, "lag-meter")
         check(meter.text.contains("awdl0 · direct (AWDL)") == current.isOn,
               "lag meter shows the link \(current.isOn ? "with" : "only with") the experiment on")
+    }
+
+    // MARK: Direct-link intro
+
+    private func checkDirectLinkIntro() {
+        let intro = DirectLinkIntroWindow(linkOn: false)
+        var turnedOn = false
+        intro.onTurnOn = { turnedOn = true }
+        render(intro, "direct-link-intro")
+        check(intro.sharingType == .none, "the direct-link intro is hidden from screen sharing")
+        check(intro.primaryButton.title == "Turn On Direct Link", "the intro has a Turn On Direct Link button")
+        intro.primaryButton.performClick(nil)
+        check(turnedOn, "Turn On Direct Link turns the link on")
+        let on = DirectLinkIntroWindow(linkOn: true)
+        render(on, "direct-link-intro-on")
+        check(on.primaryButton.title == "OK", "with the link already on, the intro only says so")
+        on.close()
+
+        let offer = DirectLinkIntroWindow.shouldOffer
+        check(offer(true, false, false, false), "the intro is offered once after an update")
+        check(!offer(false, false, false, false) && !offer(true, true, false, false)
+              && !offer(true, false, true, false) && !offer(true, false, false, true),
+              "but not to new users, not twice, not when the link is on and not while mirroring")
+        let helpItem = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)
+            .first { $0.action == #selector(AppDelegate.showDirectLinkIntro(_:)) }
+        check(helpItem != nil, "Help › \(helpItem?.title ?? "What's New (missing)")")
     }
 
     // MARK: H.265 (what the iPad sends over AWDL)

@@ -96,6 +96,13 @@ enum Settings {
         set { d.set(newValue, forKey: "hasSeenWelcome") }
     }
 
+    /// The direct-link intro (`DirectLinkIntroWindow`) was shown, or the
+    /// welcome window already covered it.
+    static var seenDirectLinkIntro: Bool {
+        get { bool("seenDirectLinkIntro", false) }
+        set { d.set(newValue, forKey: "seenDirectLinkIntro") }
+    }
+
     /// Look for a new release on GitHub when the app opens (never mid-lesson).
     static var autoCheckUpdates: Bool {
         get { bool("autoCheckUpdates", true) }

@@ -93,8 +93,9 @@ direct link wasn't making the Mac's normal Wi-Fi worse. It wasn't: 1.3 to
 1.4 slow pings (over 30 ms) a second with the direct link, against 2.1
 through the router.
 
-To use it, pick View → Connect Directly to iPad (Beta). TutorMirror reopens to
-switch. It keeps listening on your normal Wi-Fi as well, but the iPad picked
+To use it, pick View → Connect Directly to iPad (Beta), or click Turn On
+Direct Link in the intro that shows up once after you update to 0.4.1 (it's
+also under Help → What's New). TutorMirror reopens to switch. It keeps listening on your normal Wi-Fi as well, but the iPad picked
 the direct link every time I tried. The first time, the iPad asks for a
 4-digit code, like an Apple TV does. The code shows on the Mac only, so
 students don't see it.
