@@ -89,6 +89,7 @@ final class NTPTimingServer: @unchecked Sendable {
             switch state {
             case .ready:
                 self.logger.info("NTP active sync connection ready")
+                PeerToPeer.logLink("Timing (to iPad)", connection)
                 self.startTimingRequestLoop()
             case .failed(let error):
                 self.logger.error("NTP active sync failed: \(error)")

@@ -118,9 +118,17 @@ final class LatencyStats: @unchecked Sendable {
         /// Extra travel time per frame compared with the fastest recent frame.
         var netExtra: (avg: Double, p95: Double) = (0, 0)
         var clockSynced = false
+        /// Interface the mirror stream arrived on ("en0", "awdl0"), once connected.
+        var link: String?
     }
 
     private let lock = NSLock()
+    private var _link: String?
+    /// Set when the mirror stream connects; cleared by `reset()` (new stream).
+    var link: String? {
+        get { lock.lock(); defer { lock.unlock() }; return _link }
+        set { lock.lock(); _link = newValue; lock.unlock() }
+    }
     /// Last out-of-range iPad→Mac value, for diagnosing clock-sync problems.
     var lastRejected: Double?
     private var shown: [Sample] = []
@@ -201,7 +209,7 @@ final class LatencyStats: @unchecked Sendable {
         let now = HostTime.seconds(HostTime.now)
         lock.lock()
         trim(now: now)
-        let s = shown, r = received, sk = skippedTimes.count, d = dims
+        let s = shown, r = received, sk = skippedTimes.count, d = dims, link = _link
         lock.unlock()
 
         func stat(_ v: [Double]) -> (Double, Double) {
@@ -216,6 +224,7 @@ final class LatencyStats: @unchecked Sendable {
         out.shownFPS = s.count
         out.skipped = sk
         out.width = d.0; out.height = d.1
+        out.link = link
         out.decode = stat(s.map(\.decode))
         out.display = stat(s.map(\.display))
         out.macSide = stat(s.map { $0.decode + $0.display })
@@ -235,7 +244,7 @@ final class LatencyStats: @unchecked Sendable {
 
     func reset() {
         lock.lock()
-        shown.removeAll(); received.removeAll(); skippedTimes.removeAll(); dims = (0, 0)
+        shown.removeAll(); received.removeAll(); skippedTimes.removeAll(); dims = (0, 0); _link = nil
         bestTransit = .infinity; previousBestTransit = .infinity; bestTransitBucketStart = 0
         lock.unlock()
     }

@@ -66,4 +66,33 @@ struct PeerToPeer: Equatable, Sendable {
         var on: Int32 = 1
         return setsockopt(fd, SOL_SOCKET, Self.soRecvAnyIf, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 ? 0 : errno
     }
+
+    // MARK: Which link a connection uses
+
+    private static let lagLog = Logger(subsystem: "local.tutormirror", category: "Lag")
+
+    /// Logs, in the "Lag" category, which interface a ready connection uses,
+    /// and returns its name ("en0", "awdl0", "lo0", or "?").
+    @discardableResult
+    static func logLink(_ what: String, _ connection: NWConnection) -> String {
+        let path = connection.currentPath
+        let interface = path?.availableInterfaces.first
+        let name = interface?.name ?? "?"
+        let type = interface.map { "\($0.type)" } ?? "?"
+        let remote = path?.remoteEndpoint.map { "\($0)" } ?? "\(connection.endpoint)"
+        lagLog.notice("\(what, privacy: .public) link: \(name, privacy: .public) (\(type, privacy: .public)) \(remote, privacy: .public) peerToPeer=\(current.mode.rawValue, privacy: .public)")
+        return name
+    }
+
+    /// AWDL's interfaces (awdl0, and llw0 that rides along with it).
+    static func isPeerToPeer(interface name: String) -> Bool {
+        name.hasPrefix("awdl") || name.hasPrefix("llw")
+    }
+
+    /// For the lag meter: "awdl0 · direct (AWDL)" or "en0 · through the router".
+    static func label(interface name: String) -> String {
+        if isPeerToPeer(interface: name) { return "\(name) · direct (AWDL)" }
+        if name.hasPrefix("en") { return "\(name) · through the router" }
+        return name
+    }
 }

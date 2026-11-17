@@ -78,6 +78,10 @@ final class LagMeterPanel: NSPanel {
         // A gap the iPad's own timestamps also show is the iPad not sending
         // (nothing changed on screen); the rest was lost on the way here.
         lines.append("hiccup   \(ms(s.worstGap)) ms longest gap (iPad idle \(ms(s.worstGapSender)), held up \(ms(s.worstGap - s.worstGapSender))) · \(s.skipped) skipped")
+        // Peer-to-peer experiment only: which link the picture comes over.
+        if PeerToPeer.current.isOn {
+            lines.append("link     \(s.link.map { PeerToPeer.label(interface: $0) } ?? "–")  (peerToPeer \(PeerToPeer.current.mode.rawValue))")
+        }
         label.stringValue = lines.joined(separator: "\n")
 
         let size = label.fittingSize

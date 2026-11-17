@@ -150,6 +150,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
                     + " mac=\(ms(s.macSide.avg))/p95 \(ms(s.macSide.p95))"
                     + " gap=\(ms(s.worstGap)) gapIdle=\(ms(s.worstGapSender))"
                     + " netExtra=\(ms(s.netExtra.avg))/p95 \(ms(s.netExtra.p95))"
+                    + " via=\(s.link ?? "-")"
                 self.lagLog.notice("\(line, privacy: .public)")
             }
         }

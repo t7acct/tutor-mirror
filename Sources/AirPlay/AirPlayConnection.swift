@@ -98,6 +98,7 @@ final class AirPlayConnection: @unchecked Sendable {
             switch state {
             case .ready:
                 self?.logger.info("Connection ready")
+                if let self { PeerToPeer.logLink("Control", self.connection) }
                 self?.receiveData()
             case .failed(let error):
                 self?.logger.error("Connection failed: \(error)")
