@@ -31,6 +31,9 @@ watch, I freeze it.
 - Keeps the Mac awake while you're mirroring.
 - Updates itself from this page, and never in the middle of a lesson.
 - Has a lag meter (⌘L) that shows where any delay comes from.
+- Beta: takes the picture straight from the iPad, skipping the router
+  ([details](#direct-link-beta)). In my tests that cut the Wi-Fi delay per
+  frame from about 22 ms to 2 ms.
 
 ## Why I built it
 
@@ -233,6 +236,7 @@ changing them.
 defaults write local.tutormirror maxFPS -int 120         # ask for 120 fps (most devices still send 60)
 defaults write local.tutormirror streamWidth -int 3640   # ask for a bigger picture
 defaults write local.tutormirror streamHeight -int 2048
+defaults write local.tutormirror peerToPeer -int 2       # direct link only, never the router (reopen the app)
 defaults delete local.tutormirror                        # back to defaults
 ```
 
@@ -265,7 +269,7 @@ While you're mirroring, TutorMirror keeps the Mac and its display awake, so the
 shared window doesn't freeze when you've only been writing on the iPad.
 
 It only does screen mirroring. Casting a YouTube video, audio-only AirPlay
-from Music and 4K/H.265 streams won't work.
+from Music and 4K video won't work.
 
 If your device can't find TutorMirror, check they're on the same network,
 check TutorMirror is allowed under System Settings → Privacy & Security →
@@ -284,8 +288,8 @@ gap between frames, split into "iPad idle" (nothing changed on the iPad's
 screen) and "held up" (the frame existed and got stuck on the way). With AWDL
 you'll see a gap of about 100 ms, nearly all of it held up.
 
-The app can't stop this, I tried. Turning AWDL off does, if you can live
-without AirDrop and Handoff for a while:
+The direct link (below) gets around it without turning anything off. Turning
+AWDL off works too, if you can live without AirDrop and Handoff for a while:
 
 ```bash
 sudo ifconfig awdl0 down   # "up" brings it back, and so does a restart
@@ -293,6 +297,31 @@ sudo ifconfig awdl0 down   # "up" brings it back, and so does a restart
 
 Plugging the Mac into Ethernet should get around it too, though I haven't
 tried that. I leave AWDL on, because I use Universal Clipboard while teaching.
+
+## Direct link (beta)
+
+View → Connect Directly to iPad (Beta) makes the iPad send the picture
+straight to the Mac over AWDL, the same peer-to-peer Wi-Fi link AirDrop uses.
+The video then crosses the air once instead of twice, and AWDL's
+once-a-second trip off the router's channel stops holding frames up.
+TutorMirror reopens to switch. It still listens on your normal Wi-Fi too, but
+in my tests the iPad always picked the direct link.
+
+The first time, the iPad asks for a 4-digit code. It's shown on the Mac only,
+so students don't see it, and the iPad doesn't ask again after that.
+
+Same iPad, Mac and room, writing in Goodnotes:
+
+| | Through the router | Direct link |
+|---|---|---|
+| Frames per second | 31 | 60 |
+| Wi-Fi delay per frame, median / slowest 5% | 22 / 85 ms | 2 / 6 ms |
+| Frame held up 40 ms or more in a 2-second stretch | 92% of the time | never |
+
+Over the direct link the iPad sends H.265, so TutorMirror offers H.265 while
+the beta is on. I haven't tried it with a Meet call running or for a whole
+lesson yet. The full numbers and what's still untested are in
+[docs/direct-link.md](docs/direct-link.md).
 
 ## Credits and licence
 
