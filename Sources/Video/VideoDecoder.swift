@@ -9,7 +9,7 @@ protocol FrameSink: AnyObject, Sendable {
     func streamReset()
 }
 
-/// H.264 decoder tuned for latency.
+/// H.264 (and, for the peer-to-peer experiment, H.265) decoder tuned for latency.
 ///
 /// Differences from VirtualMirror's decoder:
 /// - outputs the video's native YUV format (no per-frame BGRA conversion pass)
@@ -23,9 +23,8 @@ final class VideoDecoder: @unchecked Sendable {
 
     private var session: VTDecompressionSession?
     private var formatDescription: CMVideoFormatDescription?
-    private var nalLengthSize: Int32 = 4
-    private var lastSPS: Data?
-    private var lastPPS: Data?
+    /// The parameter sets the session was built from (SPS, PPS; or VPS, SPS, PPS).
+    private var lastParameterSets: [Data]?
     private let sessionLock = NSLock()
 
     private let sinkLock = NSLock()
@@ -50,9 +49,7 @@ final class VideoDecoder: @unchecked Sendable {
         if let s = session { VTDecompressionSessionInvalidate(s) }
         session = nil
         formatDescription = nil
-        nalLengthSize = 4
-        lastSPS = nil
-        lastPPS = nil
+        lastParameterSets = nil
         sessionLock.unlock()
 
         statsLock.lock(); stats = Stats(); errorCount = 0; statsLock.unlock()
@@ -62,13 +59,24 @@ final class VideoDecoder: @unchecked Sendable {
         logger.info("Decoder reset")
     }
 
-    // MARK: - Codec config (avcC)
+    // MARK: - Codec config (avcC / hvcC)
+
+    /// A type-1 mirror packet: an avcC record for H.264, or (with features
+    /// bit 42 offered) a sample description starting `size "hvc1"` for H.265.
+    func configure(codecData: Data) {
+        let b = [UInt8](codecData)
+        if b.count >= 8, b[4..<8].elementsEqual("hvc1".utf8) {
+            configureHEVC(b)
+        } else {
+            configureWithAVCC(codecData)
+        }
+    }
 
     func configureWithAVCC(_ avcc: Data) {
         sessionLock.lock(); defer { sessionLock.unlock() }
         let b = [UInt8](avcc)
         guard b.count >= 7 else { return }
-        nalLengthSize = Int32((b[4] & 0x03) + 1)
+        let nalLength = Int32((b[4] & 0x03) + 1)
 
         var off = 6
         var sps: [Data] = [], pps: [Data] = []
@@ -90,31 +98,80 @@ final class VideoDecoder: @unchecked Sendable {
             logger.error("No SPS/PPS in avcC")
             return
         }
-        // Same parameters (e.g. iPad unlock): keep the session so P-frames that
-        // reference pre-lock frames still decode.
-        if s == lastSPS && p == lastPPS && session != nil { return }
+        install([s, p], nalLength: nalLength, hevc: false)
+    }
 
-        var desc: CMVideoFormatDescription?
-        let status = s.withUnsafeBytes { sp in
-            p.withUnsafeBytes { pp in
-                let ptrs = [sp.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                            pp.baseAddress!.assumingMemoryBound(to: UInt8.self)]
-                return CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: kCFAllocatorDefault, parameterSetCount: 2,
-                    parameterSetPointers: ptrs, parameterSetSizes: [s.count, p.count],
-                    nalUnitHeaderLength: nalLengthSize, formatDescriptionOut: &desc)
-            }
-        }
-        guard status == noErr, let desc else {
-            logger.error("Format description failed: \(status)")
+    /// H.265: the iPad's sample description holds an `hvcC` box (UxPlay reads
+    /// its arrays at a fixed 0x75; the box is looked up here instead).
+    private func configureHEVC(_ b: [UInt8]) {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        guard let parsed = Self.hevcParameterSets(b) else {
+            let head = b.prefix(160).map { String(format: "%02x", $0) }.joined()
+            logger.error("No VPS/SPS/PPS in the H.265 codec data (\(b.count, privacy: .public) bytes): \(head, privacy: .public)")
             return
         }
-        lastSPS = s; lastPPS = p
+        install(parsed.sets, nalLength: parsed.nalLength, hevc: true)
+    }
+
+    /// VPS, SPS and PPS (first of each) and the NAL length size from an
+    /// HEVCDecoderConfigurationRecord found after an `hvcC` box header.
+    static func hevcParameterSets(_ b: [UInt8]) -> (sets: [Data], nalLength: Int32)? {
+        let tag = Array("hvcC".utf8)
+        guard b.count > 8, let at = (4...(b.count - 4)).first(where: { b[$0..<$0 + 4].elementsEqual(tag) }) else { return nil }
+        let record = at + 4
+        guard record + 23 <= b.count else { return nil }
+        let nalLength = Int32((b[record + 21] & 0x03) + 1)
+        var found: [UInt8: Data] = [:]
+        var off = record + 23
+        for _ in 0..<Int(b[record + 22]) {
+            guard off + 3 <= b.count else { break }
+            let type = b[off] & 0x3F
+            let count = Int(b[off + 1]) << 8 | Int(b[off + 2]); off += 3
+            for _ in 0..<count {
+                guard off + 2 <= b.count else { break }
+                let len = Int(b[off]) << 8 | Int(b[off + 1]); off += 2
+                guard off + len <= b.count else { break }
+                if found[type] == nil, len > 0 { found[type] = Data(b[off..<off + len]) }
+                off += len
+            }
+        }
+        guard let vps = found[32], let sps = found[33], let pps = found[34] else { return nil }
+        return ([vps, sps, pps], nalLength)
+    }
+
+    /// Builds the format and the decoder session. Caller holds `sessionLock`.
+    private func install(_ sets: [Data], nalLength: Int32, hevc: Bool) {
+        // Same parameters (e.g. iPad unlock): keep the session so P-frames that
+        // reference pre-lock frames still decode.
+        if sets == lastParameterSets && session != nil { return }
+
+        let joined = [UInt8](sets.joined())
+        var desc: CMVideoFormatDescription?
+        let status: OSStatus = joined.withUnsafeBufferPointer { buf in
+            var ptrs: [UnsafePointer<UInt8>] = []
+            var offset = 0
+            for set in sets { ptrs.append(buf.baseAddress! + offset); offset += set.count }
+            let sizes = sets.map(\.count)
+            return hevc
+                ? CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                    allocator: kCFAllocatorDefault, parameterSetCount: sets.count,
+                    parameterSetPointers: ptrs, parameterSetSizes: sizes,
+                    nalUnitHeaderLength: nalLength, extensions: nil, formatDescriptionOut: &desc)
+                : CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                    allocator: kCFAllocatorDefault, parameterSetCount: sets.count,
+                    parameterSetPointers: ptrs, parameterSetSizes: sizes,
+                    nalUnitHeaderLength: nalLength, formatDescriptionOut: &desc)
+        }
+        guard status == noErr, let desc else {
+            logger.error("Format description failed: \(status, privacy: .public)")
+            return
+        }
+        lastParameterSets = sets
         formatDescription = desc
         let dims = CMVideoFormatDescriptionGetDimensions(desc)
         statsLock.lock(); stats.width = Int(dims.width); stats.height = Int(dims.height); statsLock.unlock()
         LatencyStats.shared.setDimensions(Int(dims.width), Int(dims.height))
-        logger.info("Video format: \(dims.width)x\(dims.height)")
+        logger.info("Video format: \(dims.width, privacy: .public)x\(dims.height, privacy: .public) \(hevc ? "H.265" : "H.264", privacy: .public)")
         createSession(desc)
     }
 

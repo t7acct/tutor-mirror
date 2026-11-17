@@ -225,7 +225,13 @@ final class MirrorStreamReceiver: @unchecked Sendable {
     }
 
     private func handleCodecData(_ payload: Data, codecSubFlags: UInt8) {
-        logger.info("Codec data: \(payload.count) bytes, subFlags=0x\(String(codecSubFlags, radix: 16))")
+        logger.info("Codec data: \(payload.count, privacy: .public) bytes, subFlags=0x\(String(codecSubFlags, radix: 16), privacy: .public)")
+        if payload.isEmpty {
+            // UxPlay: the sender wants a codec other than H.264 but the
+            // receiver didn't offer it (features bit 42, ScreenMultiCodec).
+            // Seen from the iPad over AWDL, which sends H.265 there.
+            logger.error("Empty codec data: the sender wants a codec this receiver didn't offer (H.265 needs features bit 42)")
+        }
         guard payload.count >= 8 else { return }
         // 0x56/0x5e = stream suspending (iPad locked/asleep); 0x16/0x1e = active.
         let suspending = (codecSubFlags == 0x56 || codecSubFlags == 0x5e)
@@ -234,6 +240,6 @@ final class MirrorStreamReceiver: @unchecked Sendable {
             logger.info("Video stream \(suspending ? "suspended" : "resumed")")
         }
         // The AES-CTR counter is continuous across codec changes — don't reset it.
-        videoDecoder.configureWithAVCC(payload)
+        videoDecoder.configure(codecData: payload)
     }
 }

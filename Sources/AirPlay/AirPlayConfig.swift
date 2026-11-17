@@ -44,8 +44,11 @@ struct AirPlayConfig {
     // High word 0x0:
     //   NOT setting bits 33-36 (Volume, AirPlayVideoV2, RFC2198, AP2)
     //   These caused the iPhone to use AirPlay 2 protocol paths
+    //   Bit 42 (ScreenMultiCodec, H.265) only for the peer-to-peer experiment:
+    //   over AWDL the iPad sends H.265 and, without this bit, empty codec data.
     static let featuresLow: UInt32 = 0x5A7FFEE6
-    static let featuresHigh: UInt32 = 0x00000000
+    static let screenMultiCodec: UInt32 = 1 << (42 - 32)
+    static var featuresHigh: UInt32 { PeerToPeer.current.isOn ? screenMultiCodec : 0 }
     static var featuresString: String {
         return String(format: "0x%X,0x%X", featuresLow, featuresHigh)
     }

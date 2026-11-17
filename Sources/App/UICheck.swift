@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Network
+import VideoToolbox
 import dnssd
 
 /// Headless check of the newer features, for developing while the real app
@@ -340,6 +341,7 @@ final class UICheck {
         checkTakeoverRules()
         await checkTakeoverOverNetwork()
         checkPeerToPeer()
+        checkHEVC()
         await checkPinPairing()
 
         // Mouse pointer: swapped for a stand-in only over the mirror window.
@@ -475,6 +477,92 @@ final class UICheck {
         render(meter, "lag-meter")
         check(meter.text.contains("awdl0 · direct (AWDL)") == current.isOn,
               "lag meter shows the link \(current.isOn ? "with" : "only with") the experiment on")
+    }
+
+    // MARK: H.265 (what the iPad sends over AWDL)
+
+    private final class CountingSink: FrameSink, @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        var frames: Int { lock.lock(); defer { lock.unlock() }; return count }
+        func display(_ pixelBuffer: CVPixelBuffer, timing: FrameTiming) { lock.lock(); count += 1; lock.unlock() }
+        func streamReset() {}
+    }
+
+    /// The encoder's output, handed over from its callback thread.
+    private final class EncodedFrame: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _sample: CMSampleBuffer?
+        var sample: CMSampleBuffer? {
+            get { lock.lock(); defer { lock.unlock() }; return _sample }
+            set { lock.lock(); _sample = newValue; lock.unlock() }
+        }
+    }
+
+    /// Features bit 42 only with the experiment on, and an iPad-style H.265
+    /// codec packet (sample description "hvc1" with an hvcC box) followed by
+    /// a frame from the Mac's own H.265 encoder makes a picture.
+    private func checkHEVC() {
+        let on = PeerToPeer.current.isOn
+        check(AirPlayConfig.featuresHigh == (on ? 0x400 : 0) && AirPlayConfig.featuresString.hasSuffix(on ? ",0x400" : ",0x0"),
+              "features \(AirPlayConfig.featuresString): H.265 (bit 42) offered \(on ? "with" : "only with") the experiment on")
+
+        VideoDecoder().configure(codecData: Data())
+        VideoDecoder().configure(codecData: Data([0, 0, 0, 8] + Array("hvc1".utf8) + [0, 0, 0, 12] + Array("hvcC".utf8) + [1, 2, 3]))
+        check(true, "empty or cut-off H.265 codec data is ignored without crashing")
+
+        let width = 640, height = 480
+        var encoder: VTCompressionSession?
+        guard VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_HEVC,
+                                         encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil,
+                                         outputCallback: nil, refcon: nil, compressionSessionOut: &encoder) == noErr, let encoder else {
+            check(false, "H.265 encoder for the check")
+            return
+        }
+        defer { VTCompressionSessionInvalidate(encoder) }
+        var pb: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
+                            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pb)
+        guard let pb else { check(false, "pixel buffer for the check"); return }
+        let encoded = EncodedFrame()
+        VTCompressionSessionEncodeFrame(encoder, imageBuffer: pb, presentationTimeStamp: .zero, duration: .invalid,
+                                        frameProperties: nil, infoFlagsOut: nil) { status, _, sample in
+            if status == noErr, let sample { encoded.sample = sample }
+        }
+        VTCompressionSessionCompleteFrames(encoder, untilPresentationTimeStamp: .invalid)
+        guard let sample = encoded.sample, let fmt = sample.formatDescription,
+              let atoms = CMFormatDescriptionGetExtension(fmt, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any],
+              let hvcC = atoms["hvcC"] as? Data, let src = sample.dataBuffer else {
+            check(false, "H.265 frame and hvcC from the encoder")
+            return
+        }
+
+        // Laid out so the arrays start at 0x75, where UxPlay reads them.
+        func be32(_ v: Int) -> [UInt8] { [UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+        var packet = [UInt8](repeating: 0, count: 0x56)
+        packet.replaceSubrange(4..<8, with: "hvc1".utf8)
+        packet += be32(8 + hvcC.count) + Array("hvcC".utf8) + [UInt8](hvcC)
+        packet.replaceSubrange(0..<4, with: be32(packet.count))
+        let parsed = VideoDecoder.hevcParameterSets(packet)
+        check(parsed?.sets.count == 3 && parsed?.nalLength == 4 && packet[0x75] & 0x3F == 32,
+              "H.265 codec data: VPS, SPS and PPS found (arrays at 0x75, as UxPlay reads them)")
+
+        let decoder = VideoDecoder()
+        let sink = CountingSink()
+        decoder.sink = sink
+        decoder.configure(codecData: Data(packet))
+        let stats = decoder.statsSnapshot()
+        check(stats.width == width && stats.height == height, "H.265 format is \(stats.width)×\(stats.height)")
+        let len = CMBlockBufferGetDataLength(src)
+        var block: CMBlockBuffer?
+        CMBlockBufferCreateContiguous(allocator: nil, sourceBuffer: src, blockAllocator: nil, customBlockSource: nil,
+                                      offsetToData: 0, dataLength: len, flags: 0, blockBufferOut: &block)
+        if let block {
+            decoder.decode(block: block, size: len, timing: FrameTiming(senderNTP: 0, receivedHost: HostTime.now, receivedWall: NTPTime.nowSeconds))
+            decoder.waitForPendingFrames()
+        }
+        check(sink.frames == 1, "an H.265 frame decodes to a picture (\(sink.frames))")
+        LatencyStats.shared.reset()
     }
 
     // MARK: On-screen code pairing
