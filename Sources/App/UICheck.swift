@@ -335,9 +335,11 @@ final class UICheck {
         app.manager.state = .error("Port 53000 is already in use.")
         await wait(0.3)
         check(retryVisible(), "an error shows the Retry button")
+        check(!wc.videoView.isHoldingHighRefreshRate, "the 120 Hz display link is paused while not mirroring")
         app.manager.state = .mirroring("Self-test")
         await wait(0.3)
         check(!retryVisible(), "Retry is hidden while mirroring")
+        check(wc.videoView.isHoldingHighRefreshRate, "the 120 Hz display link runs while mirroring")
 
         checkTakeoverRules()
         await checkTakeoverOverNetwork()

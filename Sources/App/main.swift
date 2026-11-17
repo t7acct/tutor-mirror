@@ -191,6 +191,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         if case .error = state { retryButton.isHidden = false } else { retryButton.isHidden = true }
         updateStatusLabel()
         setLatencyCritical(isMirroring)
+        videoView.holdsHighRefreshRate = isMirroring
     }
 
     @objc private func retry() { manager.restart() }

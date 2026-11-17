@@ -55,6 +55,14 @@ final class MetalVideoView: NSView, FrameSink, @unchecked Sendable {
 
     private var displayLink: CADisplayLink?
 
+    /// Holds ProMotion panels at 120 Hz. Set while an iPad is mirroring and
+    /// off otherwise: the display link wakes the app on every refresh, which
+    /// left it waking the CPU about 240 times a second while it waited.
+    var holdsHighRefreshRate = false {
+        didSet { displayLink?.isPaused = !holdsHighRefreshRate }
+    }
+    var isHoldingHighRefreshRate: Bool { displayLink.map { !$0.isPaused } ?? false }
+
     init?(videoFrame frame: NSRect) {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else { return nil }
@@ -121,6 +129,7 @@ final class MetalVideoView: NSView, FrameSink, @unchecked Sendable {
         // their top refresh rate while mirroring, instead of dropping to 60.
         let link = displayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.isPaused = !holdsHighRefreshRate
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
