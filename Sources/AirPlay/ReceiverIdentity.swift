@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
+import os
 
 /// Per-receiver identity and port allocation. Each receiver window owns one of
 /// these, so multiple receivers can advertise side by side and an iPhone sees
@@ -8,7 +9,8 @@ import Security
 ///
 /// Ephemeral by design: a fresh device ID, signing key, and UUIDs are generated
 /// on creation and live only for the lifetime of this object — nothing is
-/// persisted, so each receiver is a clean slate every launch.
+/// persisted, so each receiver is a clean slate every launch. The exception is
+/// the peer-to-peer experiment (see `make(slot:name:)`).
 ///
 /// @unchecked Sendable: everything is immutable except `name`, which is
 /// guarded by `nameLock`.
@@ -38,14 +40,71 @@ final class ReceiverIdentity: @unchecked Sendable {
         set { nameLock.lock(); _name = newValue; nameLock.unlock() }
     }
 
-    init(slot: Int, name: String) {
+    convenience init(slot: Int, name: String) {
+        self.init(slot: slot, name: name, deviceID: ReceiverIdentity.randomDeviceID(),
+                  key: Curve25519.Signing.PrivateKey(), pairingID: UUID().uuidString, displayUUID: UUID().uuidString)
+    }
+
+    private init(slot: Int, name: String, deviceID: String, key: Curve25519.Signing.PrivateKey,
+                 pairingID: String, displayUUID: String) {
         self.slot = slot
         self._name = name
         self.ports = ReceiverIdentity.ports(forSlot: slot)
-        self.deviceID = ReceiverIdentity.randomDeviceID()
-        self.ed25519PrivateKey = Curve25519.Signing.PrivateKey()
-        self.pairingID = UUID().uuidString
-        self.displayUUID = UUID().uuidString
+        self.deviceID = deviceID
+        self.ed25519PrivateKey = key
+        self.pairingID = pairingID
+        self.displayUUID = displayUUID
+    }
+
+    // MARK: Kept across launches (peer-to-peer experiment only)
+
+    /// The receiver's identity: fresh every launch, unless the peer-to-peer
+    /// experiment is on. Over AWDL the iPad pairs once with an on-screen code
+    /// (`PinPairing`) and then trusts this receiver by its key, so the key and
+    /// IDs are kept in Application Support, readable only by you.
+    static func make(slot: Int, name: String) -> ReceiverIdentity {
+        guard PeerToPeer.current.isOn, let url = savedURL(slot: slot) else {
+            return ReceiverIdentity(slot: slot, name: name)
+        }
+        let log = Logger(subsystem: "local.tutormirror", category: "Pairing")
+        if let data = try? Data(contentsOf: url),
+           let saved = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+           let deviceID = saved["deviceID"] as? String,
+           let keyData = saved["signingKey"] as? Data,
+           let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: keyData),
+           let pairingID = saved["pairingID"] as? String,
+           let displayUUID = saved["displayUUID"] as? String {
+            log.notice("Receiver identity: kept from an earlier launch")
+            return ReceiverIdentity(slot: slot, name: name, deviceID: deviceID, key: key,
+                                    pairingID: pairingID, displayUUID: displayUUID)
+        }
+        let fresh = ReceiverIdentity(slot: slot, name: name)
+        let saved: [String: Any] = [
+            "deviceID": fresh.deviceID,
+            "signingKey": fresh.ed25519PrivateKey.rawRepresentation,
+            "pairingID": fresh.pairingID,
+            "displayUUID": fresh.displayUUID,
+        ]
+        do {
+            let fm = FileManager.default
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                   attributes: [.posixPermissions: 0o700])
+            let data = try PropertyListSerialization.data(fromPropertyList: saved, format: .binary, options: 0)
+            try data.write(to: url, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            log.notice("Receiver identity: new, saved for next time")
+        } catch {
+            log.error("Receiver identity: couldn't save (\(error.localizedDescription, privacy: .public)); the iPad will ask for a code again next launch")
+        }
+        return fresh
+    }
+
+    /// ~/Library/Application Support/<bundle ID>/receiver-identity-<slot>.plist
+    static func savedURL(slot: Int) -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+              let bundleID = Bundle.main.bundleIdentifier else { return nil }
+        return base.appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("receiver-identity-\(slot).plist")
     }
 
     var ed25519PublicKey: Curve25519.Signing.PublicKey { ed25519PrivateKey.publicKey }

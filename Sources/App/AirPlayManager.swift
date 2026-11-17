@@ -56,7 +56,7 @@ class AirPlayManager: ObservableObject {
     /// `rename(to:)` so the Bonjour advertisement and title stay in sync.
     @Published var displayName: String
 
-    init(identity: ReceiverIdentity = ReceiverIdentity(slot: 0, name: AirPlayConfig.serverName)) {
+    init(identity: ReceiverIdentity = ReceiverIdentity.make(slot: 0, name: AirPlayConfig.serverName)) {
         self.identity = identity
         self.displayName = identity.name
     }
