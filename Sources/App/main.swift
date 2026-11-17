@@ -129,6 +129,16 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
         manager.onRefusedTakeover = { [weak self] name in
             self?.showToast("Kept \(name ?? "another device") from taking over", color: .systemOrange, for: 5)
         }
+        manager.onPairing = { [weak self] event in
+            switch event {
+            case .code(let code):
+                self?.showToast("Code for the iPad:  \(code)", color: .systemBlue, for: PinPairing.CodeStore.lifetime)
+            case .paired:
+                self?.showToast("iPad paired", color: .systemGreen, for: 3)
+            case .wrongCode:
+                self?.showToast("Wrong code. Try again on the iPad", color: .systemOrange, for: 6)
+            }
+        }
 
         manager.$state
             .receive(on: RunLoop.main)

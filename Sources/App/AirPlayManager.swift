@@ -219,6 +219,14 @@ class AirPlayManager: ObservableObject {
         Task { @MainActor in self.onRefusedTakeover?(deviceName) }
     }
 
+    /// On-screen code pairing (peer-to-peer experiment): the code to show,
+    /// and how it went. Shown on the tutor-only badge.
+    var onPairing: ((PinPairing.Event) -> Void)?
+
+    nonisolated func pairingEvent(_ event: PinPairing.Event) {
+        Task { @MainActor in self.onPairing?(event) }
+    }
+
     /// A service-level failure (listener or Bonjour). Stops listening and
     /// advertising so senders don't see a receiver that can't accept them, and
     /// shows the error with a Retry button.

@@ -60,6 +60,9 @@ final class AirPlayConnection: @unchecked Sendable {
     private let pairSetupHandler: PairSetupHandler
     private let pairVerifyHandler: PairVerifyHandler
     private let fairPlayHandler = FairPlayHandler()
+    /// On-screen code pairing (peer-to-peer experiment), made on first use.
+    private lazy var pinPairing = PinPairing.Session(identity: identity)
+    private let pairingLog = Logger(subsystem: "local.tutormirror", category: "Pairing")
 
     // Mirror stream — ports are derived from this receiver's identity.
     private var mirrorStreamReceiver: MirrorStreamReceiver?
@@ -242,6 +245,14 @@ final class AirPlayConnection: @unchecked Sendable {
         case ("POST", "/pair-verify"):
             handlePairVerify(request)
 
+        // On-screen code pairing, which iOS asks for over AWDL. Only with the
+        // peer-to-peer experiment on; otherwise unhandled, as before.
+        case ("POST", "/pair-pin-start") where PeerToPeer.current.isOn:
+            handlePairPinStart(request)
+
+        case ("POST", "/pair-setup-pin") where PeerToPeer.current.isOn:
+            handlePairSetupPin(request)
+
         case ("POST", "/fp-setup"):
             handleFPSetup(request)
 
@@ -279,7 +290,7 @@ final class AirPlayConnection: @unchecked Sendable {
             sendResponse(HTTPResponse.build(headers: headers, cseq: request.cseq, isRTSP: true))
 
         default:
-            logger.warning("Unhandled: \(request.method) \(request.path)")
+            logger.warning("Unhandled: \(request.method, privacy: .public) \(request.path, privacy: .public)")
             sendResponse(HTTPResponse.ok(cseq: request.cseq))
         }
     }
@@ -323,6 +334,35 @@ final class AirPlayConnection: @unchecked Sendable {
             body: responseData,
             contentType: "application/octet-stream"
         ))
+    }
+
+    /// The sender wants to pair with a code shown on this Mac.
+    private func handlePairPinStart(_ request: HTTPRequest) {
+        let code = PinPairing.codes.next()
+        pairingLog.notice("pair-pin-start: showing a code")
+        manager?.pairingEvent(.code(code))
+        sendResponse(HTTPResponse.ok(cseq: request.cseq))
+    }
+
+    private func handlePairSetupPin(_ request: HTTPRequest) {
+        func send(_ plist: [String: Any]) {
+            if let body = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
+                sendResponse(HTTPResponse.okBplist(cseq: request.cseq, body: body))
+            } else {
+                sendResponse(HTTPResponse.build(status: 500, statusText: "Internal Server Error", cseq: request.cseq))
+            }
+        }
+        switch pinPairing.handle(request.body) {
+        case .reply(let plist):
+            send(plist)
+        case .paired(let plist, _):
+            send(plist)
+            manager?.pairingEvent(.paired)
+        case .refuse(let reason):
+            pairingLog.error("pair-setup-pin refused: \(reason, privacy: .public)")
+            if reason == "wrong code" { manager?.pairingEvent(.wrongCode) }
+            sendResponse(HTTPResponse.build(status: 470, statusText: "Connection Authorization Required", cseq: request.cseq))
+        }
     }
 
     private func handlePairVerify(_ request: HTTPRequest) {
